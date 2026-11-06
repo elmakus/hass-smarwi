@@ -13,8 +13,8 @@ from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send  # pyright:ignore[reportUnknownVariableType]
-from homeassistant.helpers.entity import DeviceInfo
 
 from .const import (
     CONF_REMOTE_ID,
@@ -267,12 +267,18 @@ class SmarwiDevice:
             )
 
     async def _async_handle_status_message(self, msg: mqtt.ReceiveMessage) -> None:
-        status = decode_keyval(cast(str, msg.payload))
+        try:
+            status = decode_keyval(cast(str, msg.payload))
+        except ValueError:
+            LOGGER.warning("Ignoring malformed SMARWI status message")
+            return
         status = {
             SmarwiDeviceProp(k): v
             for k, v in status.items()
             if k in list(SmarwiDeviceProp)
         }
+        if not status:
+            return
         changed_props = {
             name
             for name in SmarwiDeviceProp
@@ -365,11 +371,17 @@ class FinetuneSettings:
         Update the config data and notify subscribed entities if there's a change.
         """
         LOGGER.debug(f"Received message from {msg.topic}: {msg.payload}")
-        data = {
-            k: int(v)
-            for k, v in decode_keyval(cast(str, msg.payload)).items()
-            if k != "cvdist"  # cvdist is read-only
-        }
+        try:
+            data = {
+                k: int(v)
+                for k, v in decode_keyval(cast(str, msg.payload)).items()
+                if k != "cvdist"  # cvdist is read-only
+            }
+        except ValueError:
+            LOGGER.warning("Ignoring malformed SMARWI advanced configuration message")
+            return
+        if not data:
+            return
         if data != self._data:
             self._data = data
             async_dispatcher_send(
@@ -385,8 +397,8 @@ def parse_ipv4(packed_ip: int) -> str:
 
 
 def decode_keyval(payload: str) -> dict[str, str]:
-    """Parse key:value pairs separated by newlines."""
-    return dict(line.split(":", 1) for line in payload.splitlines())
+    """Parse newline-separated key:value pairs, ignoring empty lines."""
+    return dict(line.split(":", 1) for line in payload.splitlines() if line)
 
 
 def encode_keyval(data: dict[str, Any]) -> str:

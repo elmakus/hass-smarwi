@@ -2,7 +2,7 @@
 
 ## Current status
 
-This is an independently maintained, MQTT-only fork of `jirutka/hass-smarwi`. The P1a bootstrap changes metadata, documentation, and packaging only. Production Python remains identical to upstream v0.3.5 at `6a528f35a695bfb5b70e5fe22eb113a163ef7999`.
+This is an independently maintained, MQTT-only fork of `jirutka/hass-smarwi`. The P1a bootstrap changed metadata, documentation, and packaging only. The local P3a topic below adds bounded message-syntax handling and a direct `DeviceInfo` import to the inherited upstream v0.3.5 production baseline (`6a528f35a695bfb5b70e5fe22eb113a163ef7999`).
 
 The source version is `0.4.0.dev0`, not a published or hardware-tested release. There is no validated Home Assistant support range or firmware matrix. The inherited `homeassistant: 2024.1.0` HACS declaration was removed because it was not backed by tests. Omitting that filter does not mean every Home Assistant version works. A tested minimum must be declared before publishing a release.
 
@@ -64,7 +64,7 @@ These direct tests remain useful unit tests, not integration acceptance. The nex
 .venv/bin/python -m pytest -q
 ```
 
-The full suite currently has 36 passing tests and one strict expected failure. The required **Tilt contract** job runs the full pytest suite, including the original direct entity and packaging tests. The dependency-free package-only unittest command above is unchanged.
+The P2b baseline introduced 36 passing tests and one strict expected failure. The required **Tilt contract** job runs the full pytest suite, including the original direct entity and packaging tests. The dependency-free package-only unittest command above is unchanged. See P3a below for the current local test count.
 
 The new tests set up a real SMARWI config entry through `hass.config_entries.async_setup`, load its real platforms, and discover a synthetic serial through HA's MQTT message callbacks. They resolve the registered cover by its existing serial-derived unique ID. Calls through `hass.services.async_call` verify native tilt payloads, QoS 2 and non-retained publishing at the mocked HA client boundary. HA rejects invalid tilt payloads and explicitly targeted standard actions without publishing. State-machine assertions verify WINDOW, exactly the four tilt features, unknown tilt and observed closed/zero tilt without standard position attributes. A moving Stop case characterizes the inherited two mocked `stop` publishes and position invalidation after subsequent idle telemetry. Public unload removes the active cover and prevents later synthetic discovery from recreating it.
 
@@ -72,7 +72,24 @@ The 1% target remains a **strict xfail**, not a pass: the desired `open;1` paylo
 
 The official `hass` and `mqtt_mock` fixtures create disposable in-process HA objects with a mocked Paho client. No HA server is started, no live HA installation is accessed, and no real broker or device is connected. Additional guards block socket connections, UDP sends, server binds/listens and DNS, including loopback. A small fixture completes the upstream Paho mock's missing socket-close callback on disconnect, so HA cancels its actual MQTT timer; cleanup checks remain enabled. Storage, translations, registries, platform forwarding and HA service dispatch use the official fixtures, not a hand-built HA replacement.
 
-This is still a bounded baseline, not full P2/P8 acceptance. Initial retained/cached hydration, broker reconnect/session replay, availability/freshness, reload races, settings, config-flow validation, supported-version range and HACS install/update remain open. The synthetic fixture deliberately sends a separate online update after discovery; that does not prove initial cached hydration. Stop does not immediately refresh the HA state machine before telemetry, and two mocked payloads do not validate physical halt or holding. Production Python and the source release version remain unchanged. No hardware safety or Bronze quality-scale compliance is claimed; config-flow coverage, duplicate prevention and typed runtime data are among the existing gaps.
+This is still a bounded baseline, not full P2/P8 acceptance. Initial retained/cached hydration, broker reconnect/session replay, availability/freshness, reload races, settings, config-flow validation, supported-version range and HACS install/update remain open. The synthetic fixture deliberately sends a separate online update after discovery; that does not prove initial cached hydration. Stop does not immediately refresh the HA state machine before telemetry, and two mocked payloads do not validate physical halt or holding. At the P2b baseline, production Python and the source release version remained unchanged. No hardware safety or Bronze quality-scale compliance is claimed; config-flow coverage, duplicate prevention and typed runtime data are among the existing gaps.
+
+## Key/value message syntax (P3a local topic)
+
+```sh
+.venv/bin/python -m pytest tests/test_keyval.py tests/test_cover_services.py -q
+.venv/bin/python -m pytest -q
+```
+
+The shared decoder ignores empty lines, including leading/internal/trailing empty LF or CRLF lines. It still splits only at the first colon. Values, unknown keys and the inherited duplicate-key behavior are unchanged; whitespace is not normalized. A nonempty line without a colon rejects the entire message. Both MQTT callbacks catch that parse failure before changing a snapshot or dispatching an update. The advanced-configuration callback also catches failed integer conversions before assignment. New rejection warnings do not include raw payloads.
+
+An empty or unknown-only status is ignored without entity registration, snapshot replacement or an update signal. An advanced-configuration message with no writable records, including a response containing only the inherited read-only `cvdist` field, also leaves the previous snapshot unchanged. Unknown integer configuration keys remain preserved. Accepted nonempty snapshots still replace the previous dictionary; this topic does not introduce merging or require a complete set of fields. The [manufacturer MQTT documentation](https://vektiva.gitlab.io/vektivadocs/en/api/mqtt.html) describes newline-separated `key:value` status but does not settle complete-versus-partial updates. The rejection policy is a conservative implementation choice, not a verified firmware contract.
+
+Twelve decoder cases and eighteen additional public MQTT cases cover blank lines, malformed records, ignored empty/unknown-only status, noninteger configuration values, snapshot preservation, no discovery/update signal or command publish on rejection, and recovery on the next valid message. The first regression run failed before the production change. The local full suite now has **66 passes and one strict expected failure**, plus 25 unittest subtests, on the existing pinned HA 2026.11.0 environment. The expected failure still represents the separate 1% command-encoding defect. All transport remains mocked and network guards remain enabled.
+
+Active diagnostics also identified the inherited indirect `DeviceInfo` import as private in pinned HA. Importing the same class directly from `homeassistant.helpers.device_registry` resolves that finding without changing runtime behavior. Three inherited numeric-conversion warnings for status `ip`, `rssi` and `s` remain. Status numeric/domain validation, unknown position handling, topic validation, initial cached hydration, availability and settings transactions remain separate work. Keeping the previous snapshot does not establish freshness or safe writes.
+
+This topic was developed offline. Upstream, current contributor documentation and remote CI were not refreshed; no upstream-ready branch, PR, deployment or release was created. Refresh upstream and prepare an isolated production topic before submission. These checks do not complete P3 or establish Bronze compliance, a supported HA range or physical safety.
 
 ## Before any fork release
 
