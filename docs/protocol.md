@@ -94,6 +94,13 @@ QoS/publish success is not execution ACK, physical completion, no-replay protect
 or an emergency stop. No command expiry, safe retry or firmware deduplication is
 established; do not claim that a connectivity gate prevents all queued replay.
 
+Per-device subscription initialization now rolls back returned handles and its owned
+discovery reservation on failure/cancellation. A local readiness gate suppresses
+provisional and abandoned-attempt callbacks. This is HA resource ownership, not a
+firmware acknowledgement or freshness handshake. Native subscribe currently does
+not yield; test-only suspension does not establish actual broker replay ordering.
+Handlers already executing after successful initialization remain a separate limit.
+
 Inherited settings handling replaces its cached response, filters `cvdist`, copies
 the cached dictionary for a write, then requests refresh without awaiting a correlated
 response. Firmware full-snapshot application, concurrent-write preservation and
@@ -111,7 +118,7 @@ No broker port, TLS capability, firmware QoS, heartbeat or offline deadline is i
 | Evidence boundary | What it establishes | What it does not establish |
 | --- | --- | --- |
 | [Direct entity tests](../tests/test_cover_contract.py) | Tilt-only features/properties and delegation to a fake device. | Wire delivery or physical position/holding. |
-| [HA service/MQTT tests](../tests/test_cover_services.py) | Real config-entry/platform/service paths with synthetic messages and mocked Paho: payload/QoS/non-retain assertions, 1% target, rejection, hydration, session gating and unload cases. | Real broker replay/session persistence, execution ACK, fresh hardware telemetry or safe Stop/Fix. |
+| [HA service/MQTT tests](../tests/test_cover_services.py) | Real config-entry/platform/service paths with synthetic messages and mocked Paho: payload/QoS/non-retain assertions, 1% target, rejection, hydration, session gating, initialization rollback/retry and bounded unload cases. | Real broker replay/session persistence, execution ACK, fresh hardware telemetry or safe Stop/Fix. |
 | [Decoder tests](../tests/test_keyval.py) | Parser syntax/rejection cases. | Firmware field domains or snapshot completeness. |
 | [Package tests](../tests/test_package.py) | Offline archive/metadata boundaries. | HACS installation, upgrade, rollback or supported HA range. |
 
