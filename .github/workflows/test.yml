@@ -27,9 +27,8 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-tests.txt
 
-      - name: Install pinned test packages (no HA instance is started)
+      - name: Install pinned HA and official test fixtures
         run: python3 -m pip install -r requirements-tests.txt
 
-      - name: Test the tilt-only entity contract with mocked device commands
-        run: >-
-          python3 -m unittest discover -s tests -p test_cover_contract.py -v
+      - name: Test public tilt services with simulated MQTT and direct contracts
+        run: python3 -m pytest -q

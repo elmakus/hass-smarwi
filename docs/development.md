@@ -47,14 +47,32 @@ Use Python 3.14.2 or newer in a dedicated development environment. These tests i
 python3.14 -m venv .venv
 .venv/bin/python -m pip install -r requirements-tests.txt
 .venv/bin/python -m unittest discover -s tests -p test_cover_contract.py -v
-.venv/bin/python -m unittest discover -s tests -v
 ```
 
-For an existing environment, use its Python directly and install the test requirements into that environment; do not replace a working environment. `requirements-tests.txt` pins HA `2026.11.0` and the MQTT integration import dependency `paho-mqtt==2.1.0`. The **Tests / Tilt contract** job uses Python 3.14 and the same pins. Package checks select only `test_package.py`, so they remain usable without HA installed. Importing the entity can create Python bytecode caches; packaging fixtures exclude those caches instead of treating them as runtime source.
+For an existing environment, install the test requirements into that environment; do not replace it. A uv-created environment may have no pip; use an installed `uv pip install --python .venv/bin/python -r requirements-tests.txt` in that case. The **Tests / Tilt contract** job uses Python 3.14 and the same pins. Package checks select only `test_package.py`, so they remain usable without HA installed. Importing the entity can create Python bytecode caches; packaging fixtures exclude those caches instead of treating them as runtime source.
 
 Eight direct entity tests protect `WINDOW`, exactly four tilt features, absence of standard-action aliases, the tilt-position property, `is_closed`, and delegation of the four native tilt methods. The Stop case supplies an actual moving state and checks that inferred position is invalidated. The 0/1/10/30/100 entity-payload cases stop at a mocked device boundary: they do not exercise or fix the known `device.async_open(1)` command-encoding defect.
 
-This is only the initial P2/P8 slice, not the full regression harness. It does not exercise config-entry setup, the public HA service registry, MQTT transport/callbacks, availability, lifecycle, minimum HA compatibility, HACS installation, physical movement or safe holding. It does not certify measured percentage feedback or the double-stop workaround. Production Python is unchanged; no support floor or release version changes follow from these tests.
+These direct tests remain useful unit tests, not integration acceptance. The next slice exercises setup and services through HA instead of replacing those interfaces.
+
+## Public setup and tilt-service baseline (P2b)
+
+`requirements-tests.txt` pairs HA `2026.11.0` with the official `pytest-homeassistant==2026.11.0` fixtures and `paho-mqtt==2.1.0`. It also pins `aiohasupervisor==0.8.1`, matching HA's Supervisor manifest: MQTT's config flow imports it even without a Supervisor installation. The [official fixture README](https://github.com/home-assistant/core/blob/74cf5a49c63ed8d4d87717844bf14f79c28c9cea/packages/pytest-homeassistant/README.md) explains the version pairing and pytest settings. Do not install the overlapping legacy `pytest-homeassistant-custom-component`; its `0.13.375` release requires HA `2026.10.4`, not our pinned version.
+
+```sh
+.venv/bin/python -m pytest tests/test_cover_services.py -q
+.venv/bin/python -m pytest -q
+```
+
+The full suite currently has 36 passing tests and one strict expected failure. The required **Tilt contract** job runs the full pytest suite, including the original direct entity and packaging tests. The dependency-free package-only unittest command above is unchanged.
+
+The new tests set up a real SMARWI config entry through `hass.config_entries.async_setup`, load its real platforms, and discover a synthetic serial through HA's MQTT message callbacks. They resolve the registered cover by its existing serial-derived unique ID. Calls through `hass.services.async_call` verify native tilt payloads, QoS 2 and non-retained publishing at the mocked HA client boundary. HA rejects invalid tilt payloads and explicitly targeted standard actions without publishing. State-machine assertions verify WINDOW, exactly the four tilt features, unknown tilt and observed closed/zero tilt without standard position attributes. A moving Stop case characterizes the inherited two mocked `stop` publishes and position invalidation after subsequent idle telemetry. Public unload removes the active cover and prevents later synthetic discovery from recreating it.
+
+The 1% target remains a **strict xfail**, not a pass: the desired `open;1` payload currently becomes `close` in production device code. An unexpected pass fails CI, so a later P6 fix must remove that marker. The suite does not hide dependency or setup errors to make that case pass.
+
+The official `hass` and `mqtt_mock` fixtures create disposable in-process HA objects with a mocked Paho client. No HA server is started, no live HA installation is accessed, and no real broker or device is connected. Additional guards block socket connections, UDP sends, server binds/listens and DNS, including loopback. A small fixture completes the upstream Paho mock's missing socket-close callback on disconnect, so HA cancels its actual MQTT timer; cleanup checks remain enabled. Storage, translations, registries, platform forwarding and HA service dispatch use the official fixtures, not a hand-built HA replacement.
+
+This is still a bounded baseline, not full P2/P8 acceptance. Initial retained/cached hydration, broker reconnect/session replay, availability/freshness, reload races, settings, config-flow validation, supported-version range and HACS install/update remain open. The synthetic fixture deliberately sends a separate online update after discovery; that does not prove initial cached hydration. Stop does not immediately refresh the HA state machine before telemetry, and two mocked payloads do not validate physical halt or holding. Production Python and the source release version remain unchanged. No hardware safety or Bronze quality-scale compliance is claimed; config-flow coverage, duplicate prevention and typed runtime data are among the existing gaps.
 
 ## Before any fork release
 
