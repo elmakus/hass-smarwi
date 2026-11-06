@@ -4,7 +4,7 @@
 
 - Fork: <https://github.com/elmakus/hass-smarwi>; independently maintained releases.
 - Upstream: <https://github.com/jirutka/hass-smarwi>; tracked at `upstream/master`.
-- Release branch: `main`. The local `upstream-tracking` branch tracks `upstream/master`. Preserve upstream history; do not merge fork branding into upstream topics.
+- Protected release branch: `main`. PRs require passing Package checks, Linter, Typechecker, HACS Validation, and Hassfest Validation against the current base, including for administrators. Force pushes and deletion are disabled. The sole-maintainer policy does not require another human approval. The local `upstream-tracking` branch tracks `upstream/master`. Preserve upstream history; do not merge fork branding into upstream topics.
 - Base inspected on 2026-11-06: v0.3.5, `6a528f35a695bfb5b70e5fe22eb113a163ef7999`. No newer default-branch commit or open upstream PR was found.
 - Preserve MIT license notices, domain `smarwi`, serial-derived identities, and MQTT-only communication. Do not copy code from other forks to implement packaging.
 - Keep parent workspace instructions, handoffs, credentials, and personal device traces out of this repository.
@@ -15,7 +15,14 @@ For an upstream-suitable fix, fetch upstream and branch from the fresh upstream 
 
 | Topic | Base | Tests / evidence | Fork integration | Upstream status |
 | --- | --- | --- | --- | --- |
-| P1a: independent metadata and offline packaging | `6a528f35a695bfb5b70e5fe22eb113a163ef7999` | 10 offline unittest cases pass; 18 ZIP members match source bytes; production Python unchanged; read-only review found no blockers. GitHub checks are attached to the integration PR. | This fork-only topic commit (`chore/fork-bootstrap`); integration SHA is in `main`'s PR/commit history | Fork-only; do not submit upstream |
+| P1a: independent metadata and offline packaging | `6a528f35a695bfb5b70e5fe22eb113a163ef7999` | 10 offline unittest cases pass; 18 downloaded CI ZIP members match source bytes; production Python unchanged; read-only review found no blockers; all five CI gates pass on PR and merged `main` | `d157f56b11950dad1d05d43b105f7d82e15033ec`, [fork PR #1](https://github.com/elmakus/hass-smarwi/pull/1); topic commits `88beab5` and `96f7fa1` | Fork-only; no upstream PR |
+
+### P1a CI evidence (2026-11-06)
+
+- PR: [Package](https://github.com/elmakus/hass-smarwi/actions/runs/42233695833), [Lint/type checking](https://github.com/elmakus/hass-smarwi/actions/runs/42233695876), [HACS/hassfest](https://github.com/elmakus/hass-smarwi/actions/runs/42233695668).
+- Integrated `main`: [Package](https://github.com/elmakus/hass-smarwi/actions/runs/42234010585), [Lint/type checking](https://github.com/elmakus/hass-smarwi/actions/runs/42234010824), [HACS/hassfest](https://github.com/elmakus/hass-smarwi/actions/runs/42234010744).
+- The initial PR's new builder failed Ruff's `TRY004`; topic commit `96f7fa1` corrected the metadata type exception. Fresh local tests and all CI gates passed before merge. No checks were bypassed.
+- No fork release or new tag was created. Only a development Actions artifact was built and inspected. Artifact/log retention is finite; reproduce the archive from the recorded commit with the documented builder.
 
 ## Intentional P1a divergence
 
