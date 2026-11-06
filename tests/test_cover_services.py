@@ -238,6 +238,76 @@ async def test_closed_update_reports_zero_tilt_only(
     assert ATTR_CURRENT_POSITION not in state.attributes
 
 
+@pytest.mark.parametrize(
+    ("position", "closed", "expected_state"),
+    [
+        ("c", True, "closed"),
+        ("o", False, "open"),
+        (None, None, "unknown"),
+        ("", None, "unknown"),
+        ("future", None, "unknown"),
+        ("C", None, "unknown"),
+        ("O", None, "unknown"),
+    ],
+)
+async def test_position_telemetry_preserves_unknown_and_recovers(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    position: str | None,
+    closed: bool | None,
+    expected_state: str,
+) -> None:
+    """Interpret only literal c/o through public MQTT, without discarding status."""
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    snapshot = {
+        SmarwiDeviceProp.NAME: "Position fixture",
+        SmarwiDeviceProp.RIDGE_FIXED: "1",
+        SmarwiDeviceProp.RIDGE_INSIDE: "0",
+        SmarwiDeviceProp.STATE_CODE: "250",
+    }
+    if position is not None:
+        snapshot[SmarwiDeviceProp.CLOSED] = position
+    payload = "\n".join(f"{key.value}:{value}" for key, value in snapshot.items())
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+    await hass.async_block_till_done()
+    assert device._status == snapshot
+    assert device.closed is closed
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == expected_state
+    assert state.attributes["state_code"] == "IDLE"
+    assert device.available
+    assert ATTR_CURRENT_POSITION not in state.attributes
+
+    for known_position, known_closed, known_state in (
+        ("c", True, "closed"),
+        ("o", False, "open"),
+    ):
+        async_fire_mqtt_message(
+            hass,
+            f"{BASE_TOPIC}/status",
+            STATUS.replace("pos:o", f"pos:{known_position}"),
+        )
+        await hass.async_block_till_done()
+        assert device.closed is known_closed
+        state = hass.states.get(cover_id)
+        assert state is not None
+        assert state.state == known_state
+
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+    await hass.async_block_till_done()
+    assert device._status == snapshot
+    assert device.closed is closed
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == expected_state
+    # Inherited tilt inference retains zero after closed telemetry; P6 is separate.
+    assert state.attributes[ATTR_CURRENT_TILT_POSITION] == 0
+    mqtt_mock.async_publish.assert_not_called()
+
+
 async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
     hass: HomeAssistant, mqtt_mock: MqttMockHAClient, cover_id: str
 ) -> None:

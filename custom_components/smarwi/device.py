@@ -178,9 +178,11 @@ class SmarwiDevice:
 
     @property
     def closed(self) -> bool | None:
-        """Return `True` if the window is open, `False` if closed."""
-        if SmarwiDeviceProp.CLOSED in self._status:
-            return self._status[SmarwiDeviceProp.CLOSED] == "c"
+        """Return `True` if closed, `False` if open, or `None` if unknown."""
+        position = self._status.get(SmarwiDeviceProp.CLOSED)
+        if position in ("c", "o"):
+            return position == "c"
+        return None
 
     @property
     def fw_version(self) -> str | None:
