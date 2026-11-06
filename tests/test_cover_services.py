@@ -35,10 +35,6 @@ BASE_TOPIC = f"ion/{REMOTE_ID}/%{DEVICE_ID}"
 STATUS = "cid:Offline fixture\nfix:1\npos:o\nro:0\ns:250"
 
 
-class OnePercentEncodingDefect(AssertionError):
-    """Only the known single close-payload result may be an expected failure."""
-
-
 @pytest.fixture(autouse=True)
 def block_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Also block loopback connections allowed by the upstream test fixtures."""
@@ -292,25 +288,16 @@ async def test_native_tilt_services_publish(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=OnePercentEncodingDefect,
-    reason="P6: device.async_open(1) currently encodes close",
-)
 async def test_one_percent_is_an_open_target(
     hass: HomeAssistant, mqtt_mock: MqttMockHAClient, cover_id: str
 ) -> None:
-    """Record the known 1% wire defect without changing production behavior."""
+    """Publish the minimum open target through HA's native tilt service."""
     await hass.services.async_call(
         "cover",
         "set_cover_tilt_position",
         {"entity_id": cover_id, ATTR_TILT_POSITION: 1},
         blocking=True,
     )
-    if mqtt_mock.async_publish.call_args_list == [
-        call(f"{BASE_TOPIC}/cmd", "close", 2, False, message_expiry_interval=None)
-    ]:
-        raise OnePercentEncodingDefect("The 1% target produced the known close payload")
     mqtt_mock.async_publish.assert_called_once_with(
         f"{BASE_TOPIC}/cmd", "open;1", 2, False, message_expiry_interval=None
     )

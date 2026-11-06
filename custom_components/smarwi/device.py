@@ -223,7 +223,7 @@ class SmarwiDevice:
 
     async def async_open(self, position: int = 100) -> None:
         """Open the window; position is between 0 and 100 %."""
-        if position > 1:
+        if position > 0:
             LOGGER.info(f"[{self.name}] Opening window")
             await self._async_mqtt_command(f"open;{position}")
         else:
