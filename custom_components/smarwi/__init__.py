@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: 2024 Jakub Jirutka <jakub@jirutka.cz>
 """Integration for Vektiva SMARWI window opener."""
 
+from asyncio import CancelledError
+
 from homeassistant.components import mqtt
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
@@ -55,7 +57,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SmarwiConfigEntry) -> bo
         LOGGER.info(f"Discovered new SMARWI device: {device_id}")
 
         devices[device_id] = device = SmarwiDevice(hass, entry, device_id)
-        await device.async_init()
+        try:
+            await device.async_init()
+        except (Exception, CancelledError):
+            if devices.get(device_id) is device:
+                del devices[device_id]
+            raise
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

@@ -1,7 +1,7 @@
 """Public HA setup and tilt-service tests with an entirely mocked MQTT client."""
 
 import asyncio
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Coroutine, Iterable
 import logging
 import socket
 from unittest.mock import AsyncMock, Mock, call
@@ -1627,3 +1627,239 @@ async def test_failed_tilt_service_cleans_only_owned_local_intent(
         if not result.done():
             result.cancel()
         await asyncio.gather(action, return_exceptions=True)
+
+
+@pytest.mark.parametrize("boundary", [1, 2, 3])
+@pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.parametrize("retry", [False, True])
+async def test_discovery_init_failure_retry(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    entity_registry: er.EntityRegistry,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    dispatcher_spy: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: int,
+    cancel: bool,
+    retry: bool,
+) -> None:
+    """Roll back each injected acquisition failure through HA MQTT discovery."""
+    active_cache = smarwi_entry.runtime_data
+    active_device = active_cache[DEVICE_ID]
+    remote_id = "offline_other_remote"
+    serial = "offline_other_serial"
+    base_topic = f"ion/{remote_id}/%{serial}"
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: remote_id})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    dispatcher_spy.reset_mock()
+    subscribe = mqtt.async_subscribe
+    cleanups: list[Mock] = []
+    attempts = 0
+    failed_task: asyncio.Task[object] | None = None
+
+    async def acquire(
+        hass: HomeAssistant,
+        topic: str,
+        msg_callback: Callable[[mqtt.ReceiveMessage], Coroutine[None, None, None]],
+        qos: int = 0,
+        encoding: str | None = "utf-8",
+    ) -> Mock:
+        nonlocal attempts, failed_task
+        attempts += 1
+        if attempts == boundary:
+            failed_task = asyncio.current_task()
+            if cancel:
+                raise asyncio.CancelledError
+            raise RuntimeError("Synthetic subscription failure")
+        cleanup = Mock(wraps=await subscribe(hass, topic, msg_callback, qos, encoding))
+        cleanups.append(cleanup)
+        return cleanup
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mqtt, "async_subscribe", acquire)
+        async_fire_mqtt_message(hass, f"{base_topic}/online", "1")
+        await hass.async_block_till_done()
+    assert failed_task is not None
+    assert failed_task.cancelled() is cancel
+    assert attempts == boundary
+    # Check stale delivery before cache assertions so leaked listeners are visible.
+    dispatcher_spy.reset_mock()
+    async_fire_mqtt_message(hass, f"{base_topic}/status", STATUS)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
+    assert not er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    assert entry.runtime_data == {}
+    for cleanup in cleanups:
+        cleanup.assert_called_once_with()
+
+    if not retry:
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        for cleanup in cleanups:
+            cleanup.assert_called_once_with()
+        assert smarwi_entry.runtime_data is active_cache
+        assert active_cache[DEVICE_ID] is active_device
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+        )
+        await hass.async_block_till_done()
+        state = hass.states.get(cover_id)
+        assert state is not None and state.state == "closed"
+        return
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mqtt, "async_subscribe", acquire)
+        async_fire_mqtt_message(hass, f"{base_topic}/online", "1")
+        await hass.async_block_till_done()
+    assert attempts == boundary + 3
+    assert set(entry.runtime_data) == {serial}
+    dispatcher_spy.reset_mock()
+    async_fire_mqtt_message(hass, f"{base_topic}/status", STATUS)
+    await hass.async_block_till_done()
+    assert dispatcher_spy.call_count == 2  # one discovery and one status update
+    covers = [
+        item
+        for item in er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        if item.domain == "cover"
+    ]
+    assert len(covers) == 1
+    assert covers[0].unique_id == f"{serial}_cover"
+    state = hass.states.get(covers[0].entity_id)
+    assert state is not None
+    assert state.attributes["device_class"] == CoverDeviceClass.WINDOW
+    assert state.attributes["supported_features"] == (
+        CoverEntityFeature.OPEN_TILT
+        | CoverEntityFeature.CLOSE_TILT
+        | CoverEntityFeature.STOP_TILT
+        | CoverEntityFeature.SET_TILT_POSITION
+    )
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    for cleanup in cleanups:
+        cleanup.assert_called_once_with()
+    dispatcher_spy.reset_mock()
+    async_fire_mqtt_message(hass, f"{base_topic}/status", STATUS)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
+    assert smarwi_entry.runtime_data is active_cache
+    assert active_cache[DEVICE_ID] is active_device
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(cover_id)
+    assert state is not None and state.state == "closed"
+
+
+@pytest.mark.parametrize(
+    "outcome", ["success", "failure", "cancel", "unload", "failed_unload"]
+)
+async def test_discovery_init_suspended_subscription(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    entity_registry: er.EntityRegistry,
+    dispatcher_spy: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    """An explicit test-only yield probes duplicates, retained status and teardown."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: REMOTE_ID})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    subscribe = mqtt.async_subscribe
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    status_received = asyncio.Event()
+    cleanups: list[Mock] = []
+    attempts = 0
+    init_task: asyncio.Task[object] | None = None
+
+    async def acquire(
+        hass: HomeAssistant,
+        topic: str,
+        msg_callback: Callable[[mqtt.ReceiveMessage], Coroutine[None, None, None]],
+        qos: int = 0,
+        encoding: str | None = "utf-8",
+    ) -> Mock:
+        nonlocal attempts, init_task
+        attempts += 1
+        if attempts == 2:
+            init_task = asyncio.current_task()
+            entered.set()
+            await release.wait()
+            if outcome == "failure":
+                raise RuntimeError("Synthetic suspended subscription failure")
+        if attempts == 1:
+            original_handler = msg_callback
+
+            async def status_handler(msg: mqtt.ReceiveMessage) -> None:
+                status_received.set()
+                await original_handler(msg)
+
+            msg_callback = status_handler
+        cleanup = Mock(wraps=await subscribe(hass, topic, msg_callback, qos, encoding))
+        cleanups.append(cleanup)
+        return cleanup
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mqtt, "async_subscribe", acquire)
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            cache = entry.runtime_data
+            device = cache[DEVICE_ID]
+            async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+            async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS, retain=True)
+            await asyncio.wait_for(status_received.wait(), 1)
+            provisional_dispatches = dispatcher_spy.call_count
+            assert attempts == 2
+            assert cache[DEVICE_ID] is device
+            if outcome == "unload":
+                assert await hass.config_entries.async_unload(entry.entry_id)
+            if outcome == "failed_unload":
+                with monkeypatch.context() as unload_patch:
+                    unload_patch.setattr(
+                        hass.config_entries,
+                        "async_unload_platforms",
+                        AsyncMock(return_value=False),
+                    )
+                    assert not await hass.config_entries.async_unload(entry.entry_id)
+                assert entry.runtime_data is cache
+                for cleanup in cleanups:
+                    cleanup.assert_not_called()
+            assert init_task is not None
+            if outcome == "cancel":
+                init_task.cancel()
+        finally:
+            release.set()
+        await hass.async_block_till_done()
+    assert init_task.cancelled() is (outcome in {"cancel", "unload"})
+    # No platform may attach an entity to a provisional device.
+    assert provisional_dispatches == 0
+    if outcome in {"success", "failed_unload"}:
+        covers = [
+            item
+            for item in er.async_entries_for_config_entry(
+                entity_registry, entry.entry_id
+            )
+            if item.domain == "cover"
+        ]
+        assert len(covers) == 1
+        assert device._status
+    else:
+        assert cache == {}
+        assert not er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    if outcome == "failed_unload":
+        for cleanup in cleanups:
+            cleanup.assert_not_called()
+        return
+    if outcome != "unload":
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    for cleanup in cleanups:
+        cleanup.assert_called_once_with()
+    dispatcher_spy.reset_mock()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
