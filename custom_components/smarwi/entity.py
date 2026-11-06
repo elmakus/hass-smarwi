@@ -48,6 +48,7 @@ class SmarwiEntity(Entity):
                 update_handler,
             )
         )
+        await update_handler(set(SmarwiDeviceProp))
 
     @abstractmethod
     async def async_handle_update(self, changed_props: set[SmarwiDeviceProp]) -> None:

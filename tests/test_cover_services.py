@@ -1,5 +1,6 @@
 """Public HA setup and tilt-service tests with an entirely mocked MQTT client."""
 
+import asyncio
 import logging
 import socket
 from unittest.mock import AsyncMock, Mock, call
@@ -26,6 +27,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.smarwi.const import CONF_REMOTE_ID, DOMAIN
 from custom_components.smarwi.device import SmarwiDevice, SmarwiDeviceProp, StateCode
+from custom_components.smarwi.entity import SmarwiEntity
 
 REMOTE_ID = "offline_remote"
 DEVICE_ID = "offline_serial"
@@ -125,6 +127,125 @@ async def test_state_machine_has_only_window_tilt_features(
     assert state.attributes["supported_features"] == expected
     assert ATTR_CURRENT_POSITION not in state.attributes
     assert ATTR_CURRENT_TILT_POSITION not in state.attributes
+
+
+@pytest.mark.parametrize(
+    ("online", "fixed", "inside", "cover_state", "ridge_state", "fix_state"),
+    [
+        ("1", "1", "0", "closed", "off", "on"),
+        ("1", "0", "1", "unavailable", "on", "off"),
+        ("0", "1", "0", "unavailable", "unavailable", "unavailable"),
+    ],
+)
+async def test_entities_hydrate_cached_telemetry_before_attachment(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    entity_registry: er.EntityRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    online: str,
+    fixed: str,
+    inside: str,
+    cover_state: str,
+    ridge_state: str,
+    fix_state: str,
+) -> None:
+    """Read pre-attachment caches, then keep listening across unload/reload."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: REMOTE_ID})
+    entry.add_to_hass(hass)
+    status_ready = asyncio.Event()
+    original_added = SmarwiEntity.async_added_to_hass
+
+    async def add_after_status(entity: SmarwiEntity) -> None:
+        # Force the initial status dispatch to finish before attaching listeners.
+        await status_ready.wait()
+        await original_added(entity)
+
+    def dispatch(hass: HomeAssistant, signal: str, *args: object) -> None:
+        async_dispatcher_send(hass, signal, *args)
+        if args and isinstance(args[0], set) and SmarwiDeviceProp.STATE_CODE in args[0]:
+            status_ready.set()
+
+    monkeypatch.setattr(SmarwiEntity, "async_added_to_hass", add_after_status)
+    monkeypatch.setattr(
+        "custom_components.smarwi.device.async_dispatcher_send", dispatch
+    )
+
+    def entity_id(platform: str, key: str) -> str:
+        result = entity_registry.async_get_entity_id(
+            platform, DOMAIN, f"{DEVICE_ID}_{key}"
+        )
+        assert result is not None
+        return result
+
+    for _ in range(2):
+        status_ready.clear()
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        # The first online discovers MQTT subscriptions; the second caches online.
+        # Both precede status/entity discovery, unlike the historical fixture.
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", online)
+        await hass.async_block_till_done()
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", online)
+        await hass.async_block_till_done()
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/config/advanced", "vpct:80")
+        await hass.async_block_till_done()
+        mqtt_mock.async_publish.reset_mock()
+        async_fire_mqtt_message(
+            hass,
+            f"{BASE_TOPIC}/status",
+            f"cid:Offline fixture\nfix:{fixed}\npos:c\nro:{inside}\ns:250",
+        )
+        await hass.async_block_till_done()
+
+        cover = hass.states.get(entity_id("cover", "cover"))
+        assert cover is not None
+        assert cover.state == cover_state
+        if cover_state == "closed":
+            assert cover.attributes[ATTR_CURRENT_TILT_POSITION] == 0
+            assert cover.attributes["state_code"] == "IDLE"
+        for platform, key, expected in (
+            ("binary_sensor", "ridge_inside", ridge_state),
+            ("switch", "ridge_fix", fix_state),
+            ("number", "max_open_position", "80" if online == "1" else "unavailable"),
+            ("number", "move_speed", "unavailable"),
+        ):
+            state = hass.states.get(entity_id(platform, key))
+            assert state is not None
+            assert state.state == expected
+        mqtt_mock.async_publish.assert_not_called()
+
+        # Future telemetry still updates the same attached entities; no commands.
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/config/advanced", "vpct:75\nospd:40"
+        )
+        await hass.async_block_till_done()
+        cover = hass.states.get(entity_id("cover", "cover"))
+        assert cover is not None
+        assert cover.state == ("open" if online == "1" else "unavailable")
+        number = hass.states.get(entity_id("number", "max_open_position"))
+        assert number is not None
+        assert number.state == ("75" if online == "1" else "unavailable")
+        for platform, key, expected in (
+            ("binary_sensor", "ridge_inside", "off"),
+            ("switch", "ridge_fix", "on"),
+            ("number", "move_speed", "40"),
+        ):
+            state = hass.states.get(entity_id(platform, key))
+            assert state is not None
+            assert state.state == (expected if online == "1" else "unavailable")
+        mqtt_mock.async_publish.assert_not_called()
+
+        device: SmarwiDevice = hass.data[DOMAIN][entry.entry_id][DEVICE_ID]
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+        with monkeypatch.context() as patch:
+            writes = Mock()
+            patch.setattr(Entity, "async_write_ha_state", writes)
+            async_dispatcher_send(hass, device.signal_update, set(SmarwiDeviceProp))
+            await hass.async_block_till_done()
+            writes.assert_not_called()
+        assert entry.state is ConfigEntryState.NOT_LOADED
 
 
 @pytest.mark.parametrize(
