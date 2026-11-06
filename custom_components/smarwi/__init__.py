@@ -3,12 +3,11 @@
 """Integration for Vektiva SMARWI window opener."""
 
 from homeassistant.components import mqtt
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_REMOTE_ID, DOMAIN, LOGGER
-from .device import SmarwiDevice
+from .const import CONF_REMOTE_ID, LOGGER
+from .device import SmarwiConfigEntry, SmarwiDevice
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -19,7 +18,7 @@ PLATFORMS: list[Platform] = [
 ]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: SmarwiConfigEntry) -> bool:
     """Set up SMARWI from a config entry."""
 
     # Make sure MQTT integration is enabled and the client is available.
@@ -28,15 +27,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
     remote_id: str = entry.data[CONF_REMOTE_ID]
-    entry_id: str = entry.entry_id
-    hass_data: dict[str, SmarwiDevice] = hass.data.setdefault(  # pyright:ignore[reportAny]
-        DOMAIN, {}
-    ).setdefault(entry_id, {})
+    entry.runtime_data = {}
+    devices = entry.runtime_data
 
     @callback
     def connection_status_changed(connected: bool) -> None:
         if not connected:
-            for device in hass_data.values():
+            for device in devices.values():
                 device.async_broker_disconnected()
 
     entry.async_on_unload(
@@ -52,12 +49,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device_id = device_segment[1:]
 
         # Check if this device is already known
-        if device_id in hass_data:
+        if device_id in devices:
             return
 
         LOGGER.info(f"Discovered new SMARWI device: {device_id}")
 
-        hass_data[device_id] = device = SmarwiDevice(hass, entry, device_id)
+        devices[device_id] = device = SmarwiDevice(hass, entry, device_id)
         await device.async_init()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -71,11 +68,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: SmarwiConfigEntry) -> bool:
     """Handle removal of an entry."""
-    hass_data: dict[str, SmarwiDevice] = hass.data[DOMAIN]
-
-    if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        del hass_data[entry.entry_id]
-
-    return unloaded
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

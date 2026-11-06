@@ -1,6 +1,7 @@
 """Public HA setup and tilt-service tests with an entirely mocked MQTT client."""
 
 import asyncio
+from collections.abc import Callable, Iterable
 import logging
 import socket
 from unittest.mock import AsyncMock, Mock, call
@@ -23,6 +24,7 @@ from homeassistant.components.cover import (
     CoverEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceNotSupported
 from homeassistant.helpers import device_registry as dr
@@ -33,7 +35,12 @@ from homeassistant.helpers.entity_platform import async_get_platforms
 
 from custom_components.smarwi.const import CONF_REMOTE_ID, DOMAIN
 from custom_components.smarwi.cover import SmarwiCover
-from custom_components.smarwi.device import SmarwiDevice, SmarwiDeviceProp, StateCode
+from custom_components.smarwi.device import (
+    SmarwiConfigEntry,
+    SmarwiDevice,
+    SmarwiDeviceProp,
+    StateCode,
+)
 from custom_components.smarwi.entity import SmarwiEntity
 
 REMOTE_ID = "offline_remote"
@@ -140,6 +147,193 @@ def cover_id(smarwi_entry: MockConfigEntry, entity_registry: er.EntityRegistry) 
     assert registry_entry is not None
     assert registry_entry.config_entry_id == smarwi_entry.entry_id
     return entity_id
+
+
+async def test_runtime_data_is_entry_owned_before_platform_setup(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    entity_registry: er.EntityRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Give each entry its own cache before forwarding all five real platforms."""
+    forward = hass.config_entries.async_forward_entry_setups
+    caches: list[dict[str, SmarwiDevice] | None] = []
+
+    async def check_runtime(
+        entry: SmarwiConfigEntry, platforms: Iterable[Platform | str]
+    ) -> None:
+        cache = getattr(entry, "runtime_data", None)
+        caches.append(cache)
+        await forward(entry, platforms)
+
+    monkeypatch.setattr(
+        hass.config_entries, "async_forward_entry_setups", check_runtime
+    )
+    entries: list[MockConfigEntry] = []
+    for remote in (REMOTE_ID, "offline_other_remote"):
+        entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: remote})
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        entries.append(entry)
+    assert caches == [{}, {}]
+    assert caches[0] is not caches[1]
+    assert DOMAIN not in hass.data
+
+    for index, entry in enumerate(entries):
+        serial = f"runtime_serial_{index}"
+        topic = f"ion/{entry.data[CONF_REMOTE_ID]}/%{serial}"
+        for suffix, payload in (("online", "1"), ("status", STATUS)):
+            async_fire_mqtt_message(hass, f"{topic}/{suffix}", payload)
+            await hass.async_block_till_done()
+        assert set(entry.runtime_data) == {serial}
+        assert entry.runtime_data is caches[index]
+        registered = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        assert {item.domain for item in registered} == {
+            "binary_sensor",
+            "cover",
+            "number",
+            "sensor",
+            "switch",
+        }
+        assert all(item.unique_id.startswith(f"{serial}_") for item in registered)
+    assert await hass.config_entries.async_unload(entries[0].entry_id)
+    assert getattr(entries[0], "runtime_data", None) is None
+    assert entries[1].runtime_data is caches[1]
+    assert set(entries[1].runtime_data) == {"runtime_serial_1"}
+
+
+async def test_runtime_data_reload_replaces_cache_without_duplicate_devices(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    broker_connection: Mock,
+    dispatcher_spy: Mock,
+) -> None:
+    """Native reload replaces the cache and removes old transport listeners."""
+    old_cache = getattr(smarwi_entry, "runtime_data", None)
+    assert isinstance(old_cache, dict)
+    old_device = old_cache[DEVICE_ID]
+    assert await hass.config_entries.async_reload(smarwi_entry.entry_id)
+    await hass.async_block_till_done()
+    assert smarwi_entry.runtime_data == {}
+    assert smarwi_entry.runtime_data is not old_cache
+    dispatcher_spy.reset_mock()
+    broker_connection(False)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
+    broker_connection(True)
+    await hass.async_block_till_done()
+    for suffix, payload in (("online", "1"), ("status", STATUS), ("online", "1")):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{suffix}", payload)
+        await hass.async_block_till_done()
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    assert device is not old_device
+    assert old_device._status is not device._status
+    assert len(smarwi_entry.runtime_data) == 1
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "open"
+    dispatcher_spy.reset_mock()
+    mqtt_mock.async_publish.reset_mock()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "0")
+    await hass.async_block_till_done()
+    assert dispatcher_spy.call_count == 1
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", "lcfa", 2, False, message_expiry_interval=None
+    )
+
+
+async def test_runtime_data_failed_unload_keeps_active_cache(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected platform unload must not discard data or subscriptions."""
+    cache = getattr(smarwi_entry, "runtime_data", None)
+    assert isinstance(cache, dict)
+    device = cache[DEVICE_ID]
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            hass.config_entries, "async_unload_platforms", AsyncMock(return_value=False)
+        )
+        assert not await hass.config_entries.async_unload(smarwi_entry.entry_id)
+    assert smarwi_entry.state is ConfigEntryState.FAILED_UNLOAD
+    assert smarwi_entry.runtime_data is cache
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+    )
+    await hass.async_block_till_done()
+    assert cache[DEVICE_ID] is device
+    assert device.closed is True
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "closed"
+    mqtt_mock.async_publish.assert_not_called()
+
+
+async def test_runtime_data_setup_failure_retry_preserves_other_entry(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    broker_connection: Mock,
+    dispatcher_spy: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native setup failure cleans listeners; retry cannot disturb a loaded entry."""
+    active_cache = getattr(smarwi_entry, "runtime_data", None)
+    assert isinstance(active_cache, dict)
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={CONF_REMOTE_ID: "offline_other_remote"}
+    )
+    entry.add_to_hass(hass)
+    subscribe = mqtt.async_subscribe_connection_status
+    cleanups: list[Mock] = []
+
+    def track_subscription(
+        hass: HomeAssistant, listener: Callable[[bool], None]
+    ) -> Mock:
+        cleanup = Mock(wraps=subscribe(hass, listener))
+        cleanups.append(cleanup)
+        return cleanup
+
+    monkeypatch.setattr(mqtt, "async_subscribe_connection_status", track_subscription)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            AsyncMock(side_effect=RuntimeError("Synthetic forwarding failure")),
+        )
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert len(cleanups) == 1
+    cleanups[0].assert_called_once_with()
+    failed_cache = entry.runtime_data
+    assert failed_cache == {}
+    assert smarwi_entry.runtime_data is active_cache
+    dispatcher_spy.reset_mock()
+    broker_connection(False)
+    await hass.async_block_till_done()
+    assert dispatcher_spy.call_count == 1
+    broker_connection(True)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data == {}
+    assert entry.runtime_data is not failed_cache
+    assert len(cleanups) == 2
+    cleanups[1].assert_not_called()
+    assert smarwi_entry.runtime_data is active_cache
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert getattr(entry, "runtime_data", None) is None
+    cleanups[0].assert_called_once_with()
+    cleanups[1].assert_called_once_with()
+    assert smarwi_entry.runtime_data is active_cache
+    assert DOMAIN not in hass.data
 
 
 def test_config_flow_schema_uses_home_assistant_validation() -> None:
@@ -284,7 +478,7 @@ async def test_entities_hydrate_cached_telemetry_before_attachment(
             assert state.state == (expected if online == "1" else "unavailable")
         mqtt_mock.async_publish.assert_not_called()
 
-        device: SmarwiDevice = hass.data[DOMAIN][entry.entry_id][DEVICE_ID]
+        device: SmarwiDevice = entry.runtime_data[DEVICE_ID]
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
         with monkeypatch.context() as patch:
@@ -527,7 +721,7 @@ async def test_invalid_discovery_segment_does_not_create_a_device(
     segment: str,
 ) -> None:
     """Require the documented percent marker and a nonempty serial segment."""
-    devices = hass.data[DOMAIN][smarwi_entry.entry_id]
+    devices = smarwi_entry.runtime_data
     previous_devices = devices.copy()
     constructor_spy = Mock(wraps=SmarwiDevice)
     monkeypatch.setattr("custom_components.smarwi.SmarwiDevice", constructor_spy)
@@ -596,7 +790,7 @@ async def test_position_telemetry_preserves_unknown_and_recovers(
     expected_state: str,
 ) -> None:
     """Interpret only literal c/o through public MQTT, without discarding status."""
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    device: SmarwiDevice = smarwi_entry.runtime_data[DEVICE_ID]
     async_fire_mqtt_message(
         hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
     )
@@ -811,7 +1005,7 @@ async def test_invalid_status_preserves_the_previous_snapshot(
     payload: str,
 ) -> None:
     """Reject the entire message, without refreshing old data or publishing."""
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    device: SmarwiDevice = smarwi_entry.runtime_data[DEVICE_ID]
     snapshot = device._status.copy()
     previous_state = hass.states.get(cover_id)
     dispatcher_spy.reset_mock()
@@ -854,7 +1048,7 @@ async def test_invalid_initial_status_does_not_register_a_cover(
     async_fire_mqtt_message(hass, f"{topic}/status", payload)
     await hass.async_block_till_done()
     dispatcher_spy.assert_not_called()
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][serial]
+    device: SmarwiDevice = smarwi_entry.runtime_data[serial]
     assert device._status == {}
     assert (
         entity_registry.async_get_entity_id("cover", DOMAIN, f"{serial}_cover") is None
@@ -904,7 +1098,7 @@ async def test_invalid_numeric_status_is_atomic(
         assert device_registry.async_get_device_by_identifier(
             (DOMAIN, serial), smarwi_entry.entry_id
         )
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][serial]
+    device: SmarwiDevice = smarwi_entry.runtime_data[serial]
     snapshot = device._status
     previous_values = snapshot.copy()
     previous_state = hass.states.get(cover_id)
@@ -1002,7 +1196,7 @@ async def test_numeric_status_preserves_existing_conversions(
     expected_state: StateCode,
 ) -> None:
     """Keep int syntax, unsigned IP endpoints, byte order and unknown states."""
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    device: SmarwiDevice = smarwi_entry.runtime_data[DEVICE_ID]
     dispatcher_spy.reset_mock()
     payload = STATUS.replace("s:250", f"s:{state}") + f"\nip:{ip}\nrssi:{rssi}"
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
@@ -1024,7 +1218,7 @@ async def test_partial_status_replaces_numeric_fields_with_defaults(
     dispatcher_spy: Mock,
 ) -> None:
     """Missing numbers remain optional; accepted partial statuses do not merge."""
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    device: SmarwiDevice = smarwi_entry.runtime_data[DEVICE_ID]
     async_fire_mqtt_message(
         hass, f"{BASE_TOPIC}/status", STATUS + "\nip:67305985\nrssi:-63"
     )
@@ -1050,7 +1244,7 @@ async def test_advanced_config_with_empty_lines_is_decoded(
         "\nvpct:80\n\nospd:40\nfuture:7\ncvdist:1234\n\n",
     )
     await hass.async_block_till_done()
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    device: SmarwiDevice = smarwi_entry.runtime_data[DEVICE_ID]
     assert device.finetune_settings._data == {"vpct": 80, "ospd": 40, "future": 7}
     mqtt_mock.async_publish.assert_not_called()
 
@@ -1079,7 +1273,7 @@ async def test_invalid_advanced_config_preserves_the_previous_snapshot(
         hass, f"{BASE_TOPIC}/config/advanced", "vpct:80\nospd:40\nfuture:7"
     )
     await hass.async_block_till_done()
-    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    device: SmarwiDevice = smarwi_entry.runtime_data[DEVICE_ID]
     snapshot = device.finetune_settings._data.copy()
     assert snapshot == {"vpct": 80, "ospd": 40, "future": 7}
     dispatcher_spy.reset_mock()
@@ -1156,7 +1350,7 @@ async def test_broker_availability_requires_accepted_status(
     assert await hass.config_entries.async_setup(entry.entry_id)
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
     await hass.async_block_till_done()
-    device = hass.data[DOMAIN][entry.entry_id][DEVICE_ID]
+    device = entry.runtime_data[DEVICE_ID]
     if online_first:
         async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
         await hass.async_block_till_done()
@@ -1195,7 +1389,7 @@ async def test_broker_session_recovery_preserves_last_known_cache(
     ):
         async_fire_mqtt_message(hass, topic, payload)
         await hass.async_block_till_done()
-    devices = hass.data[DOMAIN][smarwi_entry.entry_id]
+    devices = smarwi_entry.runtime_data
     snapshots = {
         key: (device._status.copy(), device.finetune_settings._data.copy())
         for key, device in devices.items()
@@ -1294,7 +1488,8 @@ async def test_broker_session_recovery_preserves_last_known_cache(
     dispatcher_spy.assert_not_called()
     mqtt_mock.async_publish.assert_not_called()
     mqtt_mock.async_subscribe.assert_not_called()
-    assert smarwi_entry.entry_id not in hass.data[DOMAIN]
+    assert getattr(smarwi_entry, "runtime_data", None) is None
+    assert DOMAIN not in hass.data
     assert {
         entity_id: hass.states.get(entity_id) for entity_id in entity_ids
     } == unloaded_states
@@ -1314,7 +1509,7 @@ async def test_broker_disconnected_discovery_cannot_arm_online(
     for suffix, payload in (("online", "1"), ("online", "1"), ("status", STATUS)):
         async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{suffix}", payload)
         await hass.async_block_till_done()
-    device = hass.data[DOMAIN][entry.entry_id][DEVICE_ID]
+    device = entry.runtime_data[DEVICE_ID]
     assert not device.available
     mqtt_mock.async_publish.assert_not_called()
     broker_connection(True)

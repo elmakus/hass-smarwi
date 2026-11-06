@@ -10,29 +10,28 @@ from homeassistant.components.cover import (
     CoverEntityDescription,
     CoverEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, LOGGER, NEAR_FRAME_POSITION, SIGNAL_DISCOVERY_NEW
-from .device import SmarwiDeviceProp, SmarwiDevice
+from .const import LOGGER, NEAR_FRAME_POSITION, SIGNAL_DISCOVERY_NEW
+from .device import SmarwiConfigEntry, SmarwiDeviceProp, SmarwiDevice
 from .entity import SmarwiEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: SmarwiConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the SMARWI window cover entities."""
-    hass_data: dict[str, SmarwiDevice] = hass.data[DOMAIN][entry.entry_id]
+    devices = entry.runtime_data
 
     async def async_discover_device(entry_id: str, device_id: str) -> None:
         if entry_id != entry.entry_id:
             return  # not for us
-        assert hass_data[device_id] is not None
-        async_add_entities([SmarwiCover(hass_data[device_id])])
+        assert devices[device_id] is not None
+        async_add_entities([SmarwiCover(devices[device_id])])
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_DISCOVERY_NEW, async_discover_device)

@@ -6,7 +6,7 @@ from enum import IntEnum, StrEnum
 from functools import cached_property
 import socket
 import struct
-from typing import Any, cast  # pyright:ignore[reportAny]
+from typing import Any, TypeAlias, cast  # pyright:ignore[reportAny]
 from typing_extensions import override
 
 from homeassistant.components import mqtt
@@ -26,7 +26,9 @@ from .const import (
     signal_device_update,
 )
 
-__all__ = ["FinetuneSetting", "SmarwiDevice", "SmarwiDeviceProp", "StateCode"]
+__all__ = ["FinetuneSetting", "SmarwiConfigEntry", "SmarwiDevice", "SmarwiDeviceProp", "StateCode"]
+
+SmarwiConfigEntry: TypeAlias = ConfigEntry[dict[str, "SmarwiDevice"]]
 
 
 class SmarwiDeviceProp(StrEnum):
@@ -129,7 +131,7 @@ class SmarwiDevice:
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: SmarwiConfigEntry,
         device_id: str,
     ) -> None:
         """Initialize. Run `.async_init()` afterwards."""
