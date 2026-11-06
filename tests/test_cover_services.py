@@ -1,5 +1,6 @@
 """Public HA setup and tilt-service tests with an entirely mocked MQTT client."""
 
+import logging
 import socket
 from unittest.mock import Mock, call
 
@@ -19,8 +20,10 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceNotSupported
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.smarwi.const import CONF_REMOTE_ID, DOMAIN
+from custom_components.smarwi.device import SmarwiDevice
 
 REMOTE_ID = "offline_remote"
 DEVICE_ID = "offline_serial"
@@ -59,6 +62,14 @@ def mqtt_client_mock(mqtt_client_mock: MqttMockPahoClient) -> MqttMockPahoClient
 
     mqtt_client_mock.disconnect.side_effect = disconnect
     return mqtt_client_mock
+
+
+@pytest.fixture
+def dispatcher_spy(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """Observe production dispatch calls without suppressing their callbacks."""
+    spy = Mock(wraps=async_dispatcher_send)
+    monkeypatch.setattr("custom_components.smarwi.device.async_dispatcher_send", spy)
+    return spy
 
 
 @pytest.fixture
@@ -267,6 +278,155 @@ async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
     assert state is not None
     assert ATTR_CURRENT_TILT_POSITION not in state.attributes
     assert ATTR_CURRENT_POSITION not in state.attributes
+
+
+async def test_status_with_empty_lines_updates_the_cover(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, cover_id: str
+) -> None:
+    """Decode a whole synthetic status despite leading/internal/trailing blanks."""
+    payload = "\n" + STATUS.replace("pos:o", "pos:c").replace("\n", "\n\n") + "\n\n"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+    await hass.async_block_till_done()
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "closed"
+    assert state.attributes[ATTR_CURRENT_TILT_POSITION] == 0
+    mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "",
+        "\n\n",
+        "future:present",
+        STATUS.replace("pos:o", "pos:c") + "\nbroken",
+        "broken\n" + STATUS.replace("pos:o", "pos:c"),
+        STATUS.replace("pos:o", "pos:c") + "\n ",
+    ],
+)
+async def test_invalid_status_preserves_the_previous_snapshot(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    caplog: pytest.LogCaptureFixture,
+    dispatcher_spy: Mock,
+    payload: str,
+) -> None:
+    """Reject the entire message, without refreshing old data or publishing."""
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    snapshot = device._status.copy()
+    previous_state = hass.states.get(cover_id)
+    dispatcher_spy.reset_mock()
+    caplog.clear()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
+    assert device._status == snapshot
+    assert hass.states.get(cover_id) is previous_state
+    assert all(record.levelno < logging.ERROR for record in caplog.records)
+    mqtt_mock.async_publish.assert_not_called()
+
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "closed"
+
+
+@pytest.mark.parametrize("payload", ["", "\n\n", "future:present", "s:250\nbroken"])
+async def test_invalid_initial_status_does_not_register_a_cover(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    caplog: pytest.LogCaptureFixture,
+    dispatcher_spy: Mock,
+    payload: str,
+) -> None:
+    """Do not announce entities until there is a nonempty recognized status."""
+    serial = "offline_uninitialized"
+    topic = f"ion/{REMOTE_ID}/%{serial}"
+    async_fire_mqtt_message(hass, f"{topic}/online", "1")
+    await hass.async_block_till_done()
+    mqtt_mock.async_publish.reset_mock()
+    dispatcher_spy.reset_mock()
+    caplog.clear()
+    async_fire_mqtt_message(hass, f"{topic}/status", payload)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][serial]
+    assert device._status == {}
+    assert (
+        entity_registry.async_get_entity_id("cover", DOMAIN, f"{serial}_cover") is None
+    )
+    assert all(record.levelno < logging.ERROR for record in caplog.records)
+    mqtt_mock.async_publish.assert_not_called()
+
+    async_fire_mqtt_message(hass, f"{topic}/status", STATUS)
+    await hass.async_block_till_done()
+    assert entity_registry.async_get_entity_id("cover", DOMAIN, f"{serial}_cover")
+
+
+async def test_advanced_config_with_empty_lines_is_decoded(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, smarwi_entry: MockConfigEntry
+) -> None:
+    """Protect the shared decoder's second caller without writing settings."""
+    async_fire_mqtt_message(
+        hass,
+        f"{BASE_TOPIC}/config/advanced",
+        "\nvpct:80\n\nospd:40\nfuture:7\ncvdist:1234\n\n",
+    )
+    await hass.async_block_till_done()
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    assert device.finetune_settings._data == {"vpct": 80, "ospd": 40, "future": 7}
+    mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "",
+        "\n\n",
+        "cvdist:1234",
+        "vpct:20\nbroken",
+        "broken\nvpct:20",
+        "vpct:20\nospd:invalid",
+    ],
+)
+async def test_invalid_advanced_config_preserves_the_previous_snapshot(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    dispatcher_spy: Mock,
+    payload: str,
+) -> None:
+    """Reject invalid settings before replacing any previously received values."""
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/config/advanced", "vpct:80\nospd:40\nfuture:7"
+    )
+    await hass.async_block_till_done()
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    snapshot = device.finetune_settings._data.copy()
+    assert snapshot == {"vpct": 80, "ospd": 40, "future": 7}
+    dispatcher_spy.reset_mock()
+    caplog.clear()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/config/advanced", payload)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
+    assert device.finetune_settings._data == snapshot
+    assert all(record.levelno < logging.ERROR for record in caplog.records)
+    mqtt_mock.async_publish.assert_not_called()
+
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/config/advanced", "vpct:75\nospd:30\nfuture:8"
+    )
+    await hass.async_block_till_done()
+    assert device.finetune_settings._data == {"vpct": 75, "ospd": 30, "future": 8}
 
 
 async def test_unload_removes_the_cover(
