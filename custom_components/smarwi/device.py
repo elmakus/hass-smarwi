@@ -11,7 +11,7 @@ from typing_extensions import override
 
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -142,7 +142,7 @@ class SmarwiDevice:
 
         self._remote_id: str = config[CONF_REMOTE_ID]
         self._base_topic = f"ion/{self._remote_id}/%{device_id}"
-        self._available = False
+        self._online = False
         self._status: dict[SmarwiDeviceProp, str] = {}
         self._finetune_settings = FinetuneSettings(self)
 
@@ -173,8 +173,16 @@ class SmarwiDevice:
 
     @property
     def available(self) -> bool:
-        """Return `True` if the device is available (online)."""
-        return self._available
+        """Require broker connection, session online observation and accepted status."""
+        return mqtt.is_connected(self._hass) and self._online and bool(self._status)
+
+    @callback
+    def async_broker_disconnected(self) -> None:
+        """Forget session online state without discarding last-known telemetry."""
+        self._online = False
+        async_dispatcher_send(
+            self._hass, self.signal_update, {SmarwiDeviceProp.AVAILABLE}
+        )
 
     @property
     def closed(self) -> bool | None:
@@ -290,6 +298,7 @@ class SmarwiDevice:
         except (ValueError, struct.error):
             LOGGER.warning("Ignoring malformed SMARWI status message")
             return
+        was_available = self.available
         changed_props = {
             name
             for name in SmarwiDeviceProp
@@ -309,6 +318,8 @@ class SmarwiDevice:
                 self.id,
             )
         self._status = status
+        if self.available != was_available:
+            changed_props.add(SmarwiDeviceProp.AVAILABLE)
 
         if self.state_code.is_error():
             LOGGER.error(
@@ -326,11 +337,15 @@ class SmarwiDevice:
 
     async def _async_handle_online_message(self, msg: mqtt.ReceiveMessage) -> None:
         LOGGER.debug(f"Received message from {msg.topic}: {msg.payload}")
-        if (available := bool(msg.payload == "1")) != self._available:
+        if not mqtt.is_connected(self._hass):
+            return
+        was_available = self.available
+        # Retained online replay is an observation, not proof of fresh liveness.
+        self._online = msg.payload == "1"
+        if (available := self.available) != was_available:
             LOGGER.info(
                 f"[{self.name}] SMARWI {self.id} become {'available' if available else 'unavailable'}"
             )
-            self._available = available
             async_dispatcher_send(
                 self._hass, self.signal_update, {SmarwiDeviceProp.AVAILABLE}
             )
