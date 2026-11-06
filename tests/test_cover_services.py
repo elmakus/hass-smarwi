@@ -2,7 +2,7 @@
 
 import logging
 import socket
-from unittest.mock import Mock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import probatio
 import pytest
@@ -19,11 +19,13 @@ from homeassistant.components.cover import (
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceNotSupported
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.smarwi.const import CONF_REMOTE_ID, DOMAIN
-from custom_components.smarwi.device import SmarwiDevice
+from custom_components.smarwi.device import SmarwiDevice, SmarwiDeviceProp, StateCode
 
 REMOTE_ID = "offline_remote"
 DEVICE_ID = "offline_serial"
@@ -369,6 +371,179 @@ async def test_invalid_initial_status_does_not_register_a_cover(
     async_fire_mqtt_message(hass, f"{topic}/status", STATUS)
     await hass.async_block_till_done()
     assert entity_registry.async_get_entity_id("cover", DOMAIN, f"{serial}_cover")
+
+
+@pytest.mark.parametrize("initial", [True, False], ids=["initial", "registered"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ip", "invalid"),
+        ("ip", ""),
+        ("ip", "-1"),
+        ("ip", "4294967296"),
+        ("rssi", "invalid"),
+        ("rssi", ""),
+        ("s", "invalid"),
+    ],
+)
+async def test_invalid_numeric_status_is_atomic(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    entity_registry: er.EntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    caplog: pytest.LogCaptureFixture,
+    dispatcher_spy: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    initial: bool,
+    field: str,
+    value: str,
+) -> None:
+    """Reject bad numbers before discovery, registry work or any state write."""
+    serial = "offline_numeric_initial" if initial else DEVICE_ID
+    topic = f"ion/{REMOTE_ID}/%{serial}"
+    if initial:
+        async_fire_mqtt_message(hass, f"{topic}/online", "1")
+        await hass.async_block_till_done()
+    else:
+        assert device_registry.async_get_device_by_identifier(
+            (DOMAIN, serial), smarwi_entry.entry_id
+        )
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][serial]
+    snapshot = device._status
+    previous_values = snapshot.copy()
+    previous_state = hass.states.get(cover_id)
+    registry_spy = AsyncMock(wraps=device._async_update_device_registry)
+    monkeypatch.setattr(device, "_async_update_device_registry", registry_spy)
+    registry_write_spy = Mock(wraps=device_registry.async_update_device)
+    monkeypatch.setattr(device_registry, "async_update_device", registry_write_spy)
+    real_state_write = Entity.async_write_ha_state
+    state_write_spy = Mock()
+    monkeypatch.setattr(Entity, "async_write_ha_state", state_write_spy)
+    mqtt_mock.async_publish.reset_mock()
+    dispatcher_spy.reset_mock()
+    caplog.clear()
+    payload = STATUS.replace("pos:o", "pos:c") + "\nip:67305985\nrssi:-63"
+    payload = payload.replace("Offline fixture", "Rejected numeric fixture")
+    payload = "\n".join(
+        f"{field}:{value}" if line.startswith(f"{field}:") else line
+        for line in payload.splitlines()
+    )
+    async_fire_mqtt_message(hass, f"{topic}/status", payload)
+    await hass.async_block_till_done()
+    assert device._status is snapshot
+    assert device._status == previous_values
+    dispatcher_spy.assert_not_called()
+    registry_spy.assert_not_called()
+    registry_write_spy.assert_not_called()
+    state_write_spy.assert_not_called()
+    assert hass.states.get(cover_id) is previous_state
+    if initial:
+        assert snapshot == {}
+        assert (
+            entity_registry.async_get_entity_id("cover", DOMAIN, f"{serial}_cover")
+            is None
+        )
+        assert (
+            device_registry.async_get_device_by_identifier(
+                (DOMAIN, serial), smarwi_entry.entry_id
+            )
+            is None
+        )
+    assert all(record.levelno < logging.ERROR for record in caplog.records)
+    assert any(
+        "Ignoring malformed SMARWI status message" in r.message for r in caplog.records
+    )
+    assert all(
+        "Rejected numeric fixture" not in r.message
+        for r in caplog.records
+        if r.name.startswith("custom_components.smarwi")
+    )
+    mqtt_mock.async_publish.assert_not_called()
+
+    # Restore real writes so recovery is observable in HA, not just the snapshot.
+    monkeypatch.setattr(Entity, "async_write_ha_state", real_state_write)
+    async_fire_mqtt_message(
+        hass, f"{topic}/status", STATUS.replace("pos:o", "pos:c") + "\nip:67305985"
+    )
+    await hass.async_block_till_done()
+    assert device._status is not snapshot
+    assert device.ip_address == "1.2.3.4"
+    recovered_id = entity_registry.async_get_entity_id(
+        "cover", DOMAIN, f"{serial}_cover"
+    )
+    assert recovered_id is not None
+    registry_spy.assert_awaited_once()
+    if initial:
+        assert dispatcher_spy.call_count == 2
+    else:
+        recovered_state = hass.states.get(recovered_id)
+        assert recovered_state is not None
+        assert recovered_state.state == "closed"
+        registry_write_spy.assert_called_once()
+        dispatcher_spy.assert_called_once()
+    mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("ip", "address", "rssi", "state", "expected_state"),
+    [
+        ("0", "0.0.0.0", "-63", "250", StateCode.IDLE),
+        ("4294967295", "255.255.255.255", "+1", "999", StateCode.UNKNOWN),
+        (" +67305985 ", "1.2.3.4", " -63 ", " +250 ", StateCode.IDLE),
+        ("67305985", "1.2.3.4", "1_0", "", StateCode.UNKNOWN),
+        ("67305985", "1.2.3.4", "0", "-1", StateCode.UNKNOWN),
+    ],
+)
+async def test_numeric_status_preserves_existing_conversions(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    dispatcher_spy: Mock,
+    ip: str,
+    address: str,
+    rssi: str,
+    state: str,
+    expected_state: StateCode,
+) -> None:
+    """Keep int syntax, unsigned IP endpoints, byte order and unknown states."""
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    dispatcher_spy.reset_mock()
+    payload = STATUS.replace("s:250", f"s:{state}") + f"\nip:{ip}\nrssi:{rssi}"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+    await hass.async_block_till_done()
+    assert device.ip_address == address
+    assert device.rssi == int(rssi)
+    assert device.state_code is expected_state
+    assert device._status[SmarwiDeviceProp.IP_ADDRESS] == ip
+    assert device._status[SmarwiDeviceProp.RSSI] == rssi
+    assert device._status[SmarwiDeviceProp.STATE_CODE] == state
+    dispatcher_spy.assert_called_once()
+    mqtt_mock.async_publish.assert_not_called()
+
+
+async def test_partial_status_replaces_numeric_fields_with_defaults(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    dispatcher_spy: Mock,
+) -> None:
+    """Missing numbers remain optional; accepted partial statuses do not merge."""
+    device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS + "\nip:67305985\nrssi:-63"
+    )
+    await hass.async_block_till_done()
+    dispatcher_spy.reset_mock()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", "pos:c")
+    await hass.async_block_till_done()
+    assert device._status == {SmarwiDeviceProp.CLOSED: "c"}
+    assert device.ip_address is None
+    assert device.rssi is None
+    assert device.state_code is StateCode.UNKNOWN
+    dispatcher_spy.assert_called_once()
+    mqtt_mock.async_publish.assert_not_called()
 
 
 async def test_advanced_config_with_empty_lines_is_decoded(
