@@ -178,9 +178,11 @@ class SmarwiDevice:
 
     @property
     def closed(self) -> bool | None:
-        """Return `True` if the window is open, `False` if closed."""
-        if SmarwiDeviceProp.CLOSED in self._status:
-            return self._status[SmarwiDeviceProp.CLOSED] == "c"
+        """Return `True` if closed, `False` if open, or `None` if unknown."""
+        position = self._status.get(SmarwiDeviceProp.CLOSED)
+        if position in ("c", "o"):
+            return position == "c"
+        return None
 
     @property
     def fw_version(self) -> str | None:
@@ -280,11 +282,11 @@ class SmarwiDevice:
         if not status:
             return
         try:
-            int(status.get(SmarwiDeviceProp.STATE_CODE) or 0)
+            _ = int(status.get(SmarwiDeviceProp.STATE_CODE) or 0)
             if SmarwiDeviceProp.RSSI in status:
-                int(status[SmarwiDeviceProp.RSSI])
+                _ = int(status[SmarwiDeviceProp.RSSI])
             if SmarwiDeviceProp.IP_ADDRESS in status:
-                parse_ipv4(int(status[SmarwiDeviceProp.IP_ADDRESS]))
+                _ = parse_ipv4(int(status[SmarwiDeviceProp.IP_ADDRESS]))
         except (ValueError, struct.error):
             LOGGER.warning("Ignoring malformed SMARWI status message")
             return
