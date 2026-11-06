@@ -68,9 +68,14 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
     def test_no_standard_action_aliases(self) -> None:
         """Keep standard methods inherited rather than aliasing them to tilt actions."""
         for name in (
-            "open_cover", "close_cover", "set_cover_position", "stop_cover",
-            "async_open_cover", "async_close_cover",
-            "async_set_cover_position", "async_stop_cover",
+            "open_cover",
+            "close_cover",
+            "set_cover_position",
+            "stop_cover",
+            "async_open_cover",
+            "async_close_cover",
+            "async_set_cover_position",
+            "async_stop_cover",
         ):
             with self.subTest(method=name):
                 self.assertIs(getattr(SmarwiCover, name), getattr(CoverEntity, name))

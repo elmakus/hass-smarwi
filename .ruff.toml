@@ -46,5 +46,5 @@ fixture-parentheses = false
 [lint.mccabe]
 max-complexity = 25
 
-[pyupgrade]
+[lint.pyupgrade]
 keep-runtime-typing = true

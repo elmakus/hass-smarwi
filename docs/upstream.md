@@ -18,6 +18,10 @@ For an upstream-suitable fix, fetch upstream and branch from the fresh upstream 
 | P1a: independent metadata and offline packaging | `6a528f35a695bfb5b70e5fe22eb113a163ef7999` | 10 offline unittest cases pass; 18 downloaded CI ZIP members match source bytes; production Python unchanged; read-only review found no blockers; all five CI gates pass on PR and merged `main` | `d157f56b11950dad1d05d43b105f7d82e15033ec`, [fork PR #1](https://github.com/elmakus/hass-smarwi/pull/1); topic commits `88beab5` and `96f7fa1` | Fork-only; no upstream PR |
 | P2a/P8: direct tilt-only entity contract | `0c2bd0825eeea45e86cf9701aed8ea78738ea21a` | 8 entity tests with mocked commands plus 10 packaging tests pass locally on Python 3.14.10 / HA 2026.11.0 / paho-mqtt 2.1.0; all six CI gates pass on the code commit; public HA services, setup and physical behavior remain untested | Code commit `641f6b4a272cc5c5f833b786bde78904e2699815`, [fork PR #3](https://github.com/elmakus/hass-smarwi/pull/3) records integration history | Downstream harness baseline; no upstream PR |
 
+### Formatting follow-up
+
+The `chore/stable-formatting` topic normalizes the existing packaging script and test formatting, pins Ruff to `0.14.3`, adds `ruff format --check scripts/build_release.py tests` to the required Linter job, and corrects Python-script indentation in `.editorconfig`. AST comparisons confirm that the three formatted Python files keep their behavior. The old top-level Ruff `pyupgrade` settings move to the supported `lint.pyupgrade` table without changing their value. Production integration files remain unchanged.
+
 ### P1a CI evidence (2026-11-06)
 
 - PR: [Package](https://github.com/elmakus/hass-smarwi/actions/runs/42233695833), [Lint/type checking](https://github.com/elmakus/hass-smarwi/actions/runs/42233695876), [HACS/hassfest](https://github.com/elmakus/hass-smarwi/actions/runs/42233695668).

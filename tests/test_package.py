@@ -47,7 +47,8 @@ class PackageTests(unittest.TestCase):
         """Ship exactly the integration contents and unchanged root license."""
         expected = {
             path.relative_to(self.integration).as_posix(): path.read_bytes()
-            for path in self.integration.rglob("*") if path.is_file()
+            for path in self.integration.rglob("*")
+            if path.is_file()
         }
         expected["LICENSE"] = (self.root / "LICENSE").read_bytes()
         build_release.build_release(self.output, self.tag)
@@ -58,16 +59,24 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(archive.read(name), content)
                 self.assertEqual(Path(name).is_absolute(), False)
                 self.assertNotIn("..", Path(name).parts)
-            self.assertEqual(json.loads(archive.read("manifest.json"))["version"], self.tag)
+            self.assertEqual(
+                json.loads(archive.read("manifest.json"))["version"], self.tag
+            )
         for name, content in expected.items():
-            source = self.root / "LICENSE" if name == "LICENSE" else self.integration / name
+            source = (
+                self.root / "LICENSE" if name == "LICENSE" else self.integration / name
+            )
             self.assertEqual(source.read_bytes(), content)
 
     def test_untracked_and_workspace_files_are_excluded(self) -> None:
         """Do not include local configuration, parent handoffs, caches, or outputs."""
         for name in (
-            "secrets.yaml", ".git/config.local", ".pi/settings.json", ".handoffs/PLAN.md",
-            "config/configuration.yaml", "dist/previous.zip",
+            "secrets.yaml",
+            ".git/config.local",
+            ".pi/settings.json",
+            ".handoffs/PLAN.md",
+            "config/configuration.yaml",
+            "dist/previous.zip",
             "custom_components/smarwi/local_config.json",
             "custom_components/smarwi/__pycache__/device.pyc",
         ):
@@ -78,19 +87,36 @@ class PackageTests(unittest.TestCase):
         with ZipFile(self.output) as archive:
             names = set(archive.namelist())
             self.assertNotIn("local_config.json", names)
-            excluded_roots = {".git", ".pi", ".handoffs", "config", "dist", "__pycache__"}
-            self.assertFalse(any(Path(name).parts[0] in excluded_roots for name in names))
+            excluded_roots = {
+                ".git",
+                ".pi",
+                ".handoffs",
+                "config",
+                "dist",
+                "__pycache__",
+            }
+            self.assertFalse(
+                any(Path(name).parts[0] in excluded_roots for name in names)
+            )
 
     def test_tag_must_match_manifest_exactly(self) -> None:
         """Reject mismatches and implicit v-prefix normalization before writing."""
         for tag in ("", f"v{self.tag}", "9.9.9"):
-            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "exactly match"):
+            with (
+                self.subTest(tag=tag),
+                self.assertRaisesRegex(ValueError, "exactly match"),
+            ):
                 build_release.build_release(self.output, tag)
         self.assertFalse(self.output.exists())
 
     def test_invalid_metadata_is_rejected(self) -> None:
         """Reject malformed JSON and missing or changed integration identity."""
-        for data in ("{", "[]", "{}", json.dumps({**self.manifest, "domain": "renamed"})):
+        for data in (
+            "{",
+            "[]",
+            "{}",
+            json.dumps({**self.manifest, "domain": "renamed"}),
+        ):
             with self.subTest(data=data):
                 self.manifest_path.write_text(data, encoding="utf-8")
                 with self.assertRaises(TypeError if data == "[]" else ValueError):
@@ -99,23 +125,41 @@ class PackageTests(unittest.TestCase):
 
     def test_hacs_filename_and_zip_mode_must_agree(self) -> None:
         """Reject an asset name or install mode that does not match HACS metadata."""
-        for metadata in ({"zip_release": True, "filename": "wrong.zip"}, {"zip_release": False, "filename": "smarwi.zip"}):
+        for metadata in (
+            {"zip_release": True, "filename": "wrong.zip"},
+            {"zip_release": False, "filename": "smarwi.zip"},
+        ):
             with self.subTest(metadata=metadata):
-                (self.root / "hacs.json").write_text(json.dumps(metadata), encoding="utf-8")
+                (self.root / "hacs.json").write_text(
+                    json.dumps(metadata), encoding="utf-8"
+                )
                 with self.assertRaisesRegex(ValueError, "HACS ZIP"):
                     build_release.build_release(self.output, self.tag)
         self.assertFalse(self.output.exists())
 
     def test_missing_required_file_is_rejected(self) -> None:
         """Do not build an archive without required English UI assets."""
-        subprocess.run(["git", "-C", str(self.root), "rm", "--quiet", "--force", "custom_components/smarwi/translations/en.json"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.root),
+                "rm",
+                "--quiet",
+                "--force",
+                "custom_components/smarwi/translations/en.json",
+            ],
+            check=True,
+        )
         with self.assertRaisesRegex(ValueError, "Missing required"):
             build_release.build_release(self.output, self.tag)
         self.assertFalse(self.output.exists())
 
     def test_unexpected_tracked_file_is_rejected(self) -> None:
         """Fail if local settings were accidentally staged inside the integration."""
-        (self.integration / "secrets.yaml").write_text("excluded fixture", encoding="utf-8")
+        (self.integration / "secrets.yaml").write_text(
+            "excluded fixture", encoding="utf-8"
+        )
         self.git_add("custom_components/smarwi/secrets.yaml")
         with self.assertRaisesRegex(ValueError, "Unexpected integration file"):
             build_release.build_release(self.output, self.tag)

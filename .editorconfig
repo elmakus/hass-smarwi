@@ -15,3 +15,7 @@ indent_size = 4
 [scripts/*]
 indent_size = 4
 indent_style = tab
+
+[scripts/*.py]
+indent_size = 4
+indent_style = space

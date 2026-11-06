@@ -14,7 +14,9 @@ def build_release(output: Path, tag: str) -> Path:
     """Validate release metadata and build a new archive without overwriting files."""
     integration = ROOT / "custom_components" / "smarwi"
     try:
-        manifest = json.loads((integration / "manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads(
+            (integration / "manifest.json").read_text(encoding="utf-8")
+        )
         hacs = json.loads((ROOT / "hacs.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as err:
         raise ValueError(f"Cannot read release metadata: {err}") from err
@@ -23,31 +25,53 @@ def build_release(output: Path, tag: str) -> Path:
     if manifest.get("domain") != "smarwi":
         raise ValueError("The integration domain must remain smarwi")
     if not tag or manifest.get("version") != tag:
-        raise ValueError("The tag must exactly match manifest.json version; no v prefix is added or removed")
+        raise ValueError(
+            "The tag must exactly match manifest.json version; no v prefix is added or removed"
+        )
     if hacs.get("zip_release") is not True or hacs.get("filename") != output.name:
         raise ValueError("The output filename must match the HACS ZIP release filename")
 
-    tracked = subprocess.check_output(
-        ["git", "-C", str(ROOT), "ls-files", "-z", "--", "custom_components/smarwi/"]
-    ).decode("utf-8").split("\0")
+    tracked = (
+        subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "ls-files",
+                "-z",
+                "--",
+                "custom_components/smarwi/",
+            ]
+        )
+        .decode("utf-8")
+        .split("\0")
+    )
     members = {}
     for name in filter(None, tracked):
         source = ROOT / name
         relative = source.relative_to(integration)
         parts = relative.parts
         allowed = (
-            len(parts) == 1 and (relative.suffix == ".py" or relative.name == "manifest.json")
+            len(parts) == 1
+            and (relative.suffix == ".py" or relative.name == "manifest.json")
         ) or (
             len(parts) == 2
-            and ((parts[0] == "translations" and relative.suffix == ".json")
-                 or (parts[0] == "brand" and relative.suffix == ".png"))
+            and (
+                (parts[0] == "translations" and relative.suffix == ".json")
+                or (parts[0] == "brand" and relative.suffix == ".png")
+            )
         )
         # Fail on unexpected tracked files rather than silently shipping local data.
         if not allowed or source.is_symlink() or not source.is_file():
             raise ValueError(f"Unexpected integration file: {relative}")
         members[relative.as_posix()] = source
 
-    required = {"__init__.py", "manifest.json", "translations/en.json", "brand/icon.png"}
+    required = {
+        "__init__.py",
+        "manifest.json",
+        "translations/en.json",
+        "brand/icon.png",
+    }
     if missing := required - members.keys():
         raise ValueError(f"Missing required integration files: {sorted(missing)}")
     license_path = ROOT / "LICENSE"
@@ -64,7 +88,11 @@ def build_release(output: Path, tag: str) -> Path:
 def main() -> None:
     """Build a release candidate; this command never uploads or publishes it."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", required=True, help="Exact manifest version, including any development suffix")
+    parser.add_argument(
+        "--tag",
+        required=True,
+        help="Exact manifest version, including any development suffix",
+    )
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "smarwi.zip")
     args = parser.parse_args()
     try:
