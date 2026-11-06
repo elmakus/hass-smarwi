@@ -62,19 +62,21 @@ async def test_valid_literal_id(
 ) -> None:
     """Preserve the literal ID and assign it as the new entry's unique ID."""
     form = await start_flow(hass)
-    assert form["type"] is FlowResultType.FORM
-    assert not form["errors"]
-    assert form["data_schema"]({CONF_REMOTE_ID: remote_id}) == {
-        CONF_REMOTE_ID: remote_id
-    }
+    assert form.get("type") is FlowResultType.FORM
+    assert not form.get("errors")
+    schema = form.get("data_schema")
+    assert schema is not None
+    assert schema({CONF_REMOTE_ID: remote_id}) == {CONF_REMOTE_ID: remote_id}
     result = await hass.config_entries.flow.async_configure(
         form["flow_id"], {CONF_REMOTE_ID: remote_id}
     )
     await hass.async_block_till_done()
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == NAME
-    assert result["data"] == {CONF_REMOTE_ID: remote_id}
-    assert result["result"].unique_id == remote_id
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    assert result.get("title") == NAME
+    assert result.get("data") == {CONF_REMOTE_ID: remote_id}
+    entry = result.get("result")
+    assert entry is not None
+    assert entry.unique_id == remote_id
     offline_flow.assert_awaited_once()
 
 
@@ -113,16 +115,18 @@ async def test_invalid_id_then_recover(
     result = await hass.config_entries.flow.async_configure(
         form["flow_id"], {CONF_REMOTE_ID: remote_id}
     )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {CONF_REMOTE_ID: "invalid_remote_id"}
+    assert result.get("type") is FlowResultType.FORM
+    assert result.get("errors") == {CONF_REMOTE_ID: "invalid_remote_id"}
     assert not hass.config_entries.async_entries(DOMAIN)
     offline_flow.assert_not_awaited()
     result = await hass.config_entries.flow.async_configure(
         form["flow_id"], {CONF_REMOTE_ID: "corrected"}
     )
     await hass.async_block_till_done()
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == "corrected"
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    entry = result.get("result")
+    assert entry is not None
+    assert entry.unique_id == "corrected"
 
 
 @pytest.mark.parametrize(
@@ -148,8 +152,10 @@ async def test_invalid_schema_then_recover(
     result = await hass.config_entries.flow.async_configure(
         form["flow_id"], {CONF_REMOTE_ID: "corrected"}
     )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == "corrected"
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    entry = result.get("result")
+    assert entry is not None
+    assert entry.unique_id == "corrected"
     await hass.async_block_till_done()
 
 
@@ -174,8 +180,8 @@ async def test_existing_entry_unchanged(
     result = await hass.config_entries.flow.async_configure(
         form["flow_id"], {CONF_REMOTE_ID: "existing"}
     )
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
+    assert result.get("type") is FlowResultType.ABORT
+    assert result.get("reason") == "already_configured"
     assert hass.config_entries.async_entries(DOMAIN) == [entry]
     assert entry.unique_id == unique_id
     assert entry.data == {CONF_REMOTE_ID: data_id}
@@ -190,8 +196,10 @@ async def test_literal_identity_is_case_sensitive(hass: HomeAssistant) -> None:
     result = await hass.config_entries.flow.async_configure(
         form["flow_id"], {CONF_REMOTE_ID: "existing"}
     )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == "existing"
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    created_entry = result.get("result")
+    assert created_entry is not None
+    assert created_entry.unique_id == "existing"
     await hass.async_block_till_done()
     assert len(hass.config_entries.async_entries(DOMAIN)) == 2
 
@@ -210,13 +218,15 @@ async def test_concurrent_duplicate_flows(
         )
     )
     await hass.async_block_till_done()
-    assert sorted(result["type"].value for result in results) == [
+    assert sorted(
+        result.get("type", FlowResultType.FORM).value for result in results
+    ) == [
         "abort",
         "create_entry",
     ]
-    assert next(result for result in results if result["type"] is FlowResultType.ABORT)[
-        "reason"
-    ] in {"already_configured", "already_in_progress"}
+    assert next(
+        result for result in results if result.get("type") is FlowResultType.ABORT
+    ).get("reason") in {"already_configured", "already_in_progress"}
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
     assert hass.config_entries.async_entries(DOMAIN)[0].unique_id == "same"
     offline_flow.assert_awaited_once()
@@ -233,9 +243,9 @@ async def test_native_in_progress_guard(
     result = await hass.config_entries.flow.async_configure(
         second["flow_id"], {CONF_REMOTE_ID: "reserved"}
     )
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_in_progress"
-    assert result["translation_domain"] == "homeassistant"
+    assert result.get("type") is FlowResultType.ABORT
+    assert result.get("reason") == "already_in_progress"
+    assert result.get("translation_domain") == "homeassistant"
     assert not hass.config_entries.async_entries(DOMAIN)
     offline_flow.assert_not_awaited()
     hass.config_entries.flow.async_abort(first["flow_id"])
