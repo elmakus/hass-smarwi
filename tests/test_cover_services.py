@@ -28,8 +28,8 @@ from homeassistant.exceptions import ServiceNotSupported
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity_platform import async_get_platforms
 
 from custom_components.smarwi.const import CONF_REMOTE_ID, DOMAIN
 from custom_components.smarwi.cover import SmarwiCover
@@ -270,6 +270,7 @@ async def test_entities_hydrate_cached_telemetry_before_attachment(
         cover = hass.states.get(entity_id("cover", "cover"))
         assert cover is not None
         assert cover.state == ("open" if online == "1" else "unavailable")
+        assert ATTR_CURRENT_TILT_POSITION not in cover.attributes
         number = hass.states.get(entity_id("number", "max_open_position"))
         assert number is not None
         assert number.state == ("75" if online == "1" else "unavailable")
@@ -359,7 +360,16 @@ async def test_explicit_tilt_services_publish_at_equal_inferred_position(
     await hass.async_block_till_done()
     before = hass.states.get(cover_id)
     assert before is not None
-    assert before.attributes[ATTR_CURRENT_TILT_POSITION] == target
+    cover = next(
+        platform.entities[cover_id]
+        for platform in async_get_platforms(hass, DOMAIN)
+        if cover_id in platform.entities
+    )
+    assert isinstance(cover, SmarwiCover)
+    assert cover._position == target
+    assert before.attributes.get(ATTR_CURRENT_TILT_POSITION) == (
+        0 if target == 0 else None
+    )
     mqtt_mock.async_publish.reset_mock()
 
     for _ in range(2):
@@ -587,6 +597,13 @@ async def test_position_telemetry_preserves_unknown_and_recovers(
 ) -> None:
     """Interpret only literal c/o through public MQTT, without discarding status."""
     device: SmarwiDevice = hass.data[DOMAIN][smarwi_entry.entry_id][DEVICE_ID]
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+    )
+    await hass.async_block_till_done()
+    initial = hass.states.get(cover_id)
+    assert initial is not None
+    assert initial.attributes[ATTR_CURRENT_TILT_POSITION] == 0
     snapshot = {
         SmarwiDeviceProp.NAME: "Position fixture",
         SmarwiDeviceProp.RIDGE_FIXED: "1",
@@ -603,6 +620,9 @@ async def test_position_telemetry_preserves_unknown_and_recovers(
     state = hass.states.get(cover_id)
     assert state is not None
     assert state.state == expected_state
+    assert state.attributes.get(ATTR_CURRENT_TILT_POSITION) == (
+        0 if closed is True else None
+    )
     assert state.attributes["state_code"] == "IDLE"
     assert device.available
     assert ATTR_CURRENT_POSITION not in state.attributes
@@ -621,6 +641,9 @@ async def test_position_telemetry_preserves_unknown_and_recovers(
         state = hass.states.get(cover_id)
         assert state is not None
         assert state.state == known_state
+        assert state.attributes.get(ATTR_CURRENT_TILT_POSITION) == (
+            0 if known_closed else None
+        )
 
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
     await hass.async_block_till_done()
@@ -629,9 +652,64 @@ async def test_position_telemetry_preserves_unknown_and_recovers(
     state = hass.states.get(cover_id)
     assert state is not None
     assert state.state == expected_state
-    # Inherited tilt inference retains zero after closed telemetry; P6 is separate.
-    assert state.attributes[ATTR_CURRENT_TILT_POSITION] == 0
+    assert state.attributes.get(ATTR_CURRENT_TILT_POSITION) == (
+        0 if closed is True else None
+    )
     mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.parametrize("target", [30, 100])
+async def test_near_frame_and_requested_target_are_not_tilt_feedback(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, cover_id: str, target: int
+) -> None:
+    """Keep inherited near-frame and idle target estimates out of public state."""
+    for code in (200, 250):
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", f"s:{code}")
+        )
+        await hass.async_block_till_done()
+        state = hass.states.get(cover_id)
+        assert state is not None
+        assert ATTR_CURRENT_TILT_POSITION not in state.attributes
+    await hass.services.async_call(
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": cover_id, ATTR_TILT_POSITION: target},
+        blocking=True,
+    )
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", f"open;{target}", 2, False, message_expiry_interval=None
+    )
+    for code in (210, 250):
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", f"s:{code}")
+        )
+        await hass.async_block_till_done()
+        state = hass.states.get(cover_id)
+        assert state is not None
+        assert ATTR_CURRENT_TILT_POSITION not in state.attributes
+        assert ATTR_CURRENT_POSITION not in state.attributes
+
+
+async def test_close_request_without_closed_telemetry_does_not_report_zero(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient, cover_id: str
+) -> None:
+    """A close target and idle transition do not establish observed closure."""
+    await hass.services.async_call(
+        "cover", "close_cover_tilt", {"entity_id": cover_id}, blocking=True
+    )
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", "close", 2, False, message_expiry_interval=None
+    )
+    for code in (220, 250):
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", f"s:{code}")
+        )
+        await hass.async_block_till_done()
+        state = hass.states.get(cover_id)
+        assert state is not None
+        assert ATTR_CURRENT_TILT_POSITION not in state.attributes
+        assert ATTR_CURRENT_POSITION not in state.attributes
 
 
 async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
@@ -652,7 +730,21 @@ async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
     await hass.async_block_till_done()
     state = hass.states.get(cover_id)
     assert state is not None
-    assert state.attributes[ATTR_CURRENT_TILT_POSITION] == 30
+    assert ATTR_CURRENT_TILT_POSITION not in state.attributes
+    cover = next(
+        entity
+        for platform in async_get_platforms(hass, DOMAIN)
+        for entity in platform.entities.values()
+        if entity.entity_id == cover_id
+    )
+    assert isinstance(cover, SmarwiCover)
+    assert cover._position == 30
+    await hass.services.async_call(
+        "cover",
+        "set_cover_tilt_position",
+        {"entity_id": cover_id, ATTR_TILT_POSITION: 100},
+        blocking=True,
+    )
 
     async_fire_mqtt_message(
         hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", "s:210")
@@ -661,6 +753,10 @@ async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
     state = hass.states.get(cover_id)
     assert state is not None
     assert state.state == "opening"
+    assert cover._position == 30
+    assert cover._requested_position == 100
+    assert cover.device.state_code.is_moving()
+    assert cover.current_cover_tilt_position is None
     mqtt_mock.async_publish.reset_mock()
     await hass.services.async_call(
         "cover", "stop_cover_tilt", {"entity_id": cover_id}, blocking=True
@@ -669,6 +765,8 @@ async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
         call(f"{BASE_TOPIC}/cmd", "stop", 2, False, message_expiry_interval=None),
         call(f"{BASE_TOPIC}/cmd", "stop", 2, False, message_expiry_interval=None),
     ]
+    assert cover._position == -1
+    assert cover._requested_position == -1
     # The inherited entity writes HA state on telemetry, not immediately on Stop.
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
     await hass.async_block_till_done()
