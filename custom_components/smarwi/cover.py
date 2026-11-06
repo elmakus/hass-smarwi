@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2024 Jakub Jirutka <jakub@jirutka.cz>
+from asyncio import CancelledError
+from collections.abc import Awaitable
 from typing import Any  # pyright:ignore[reportAny]
 from typing_extensions import override
 
@@ -58,6 +60,7 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
         super().__init__(device)
         self._position = -1  # unknown
         self._requested_position = -1  # unknown/none
+        self._intent_owner: object | None = None
         self._is_moving = False
 
     @property  # superclass uses @cached_property, but that doesn't work here [1]
@@ -97,19 +100,32 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
 
     @override
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:  # pyright:ignore[reportAny]
-        self._requested_position = 100
-        await self.device.async_open()
+        await self._async_request_position(100, self.device.async_open())
 
     @override
     async def async_close_cover_tilt(self, **kwargs: Any) -> None:  # pyright:ignore[reportAny]
-        self._requested_position = 0
-        await self.device.async_close()
+        await self._async_request_position(0, self.device.async_close())
 
     @override
     async def async_set_cover_tilt_position(self, **kwargs: Any) -> None:  # pyright:ignore[reportAny]
         pos = int(kwargs[ATTR_TILT_POSITION])  # pyright:ignore[reportAny]
-        self._requested_position = pos
-        await self.device.async_open(pos)
+        await self._async_request_position(pos, self.device.async_open(pos))
+
+    async def _async_request_position(
+        self, position: int, operation: Awaitable[None]
+    ) -> None:
+        owner = object()
+        self._intent_owner = owner
+        self._requested_position = position
+        try:
+            await operation
+        except (Exception, CancelledError):
+            # Failure can follow delivery; discard only this request's local intent.
+            if self._intent_owner is owner:
+                self._requested_position = -1
+                self._position = -1
+                self._intent_owner = None
+            raise
 
     @override
     async def async_stop_cover_tilt(self, **kwargs: Any) -> None:  # pyright:ignore[reportAny]
@@ -119,6 +135,7 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
 
         self._requested_position = -1  # unknown/none
         self._position = -1  # unknown
+        self._intent_owner = None
         await self.device.async_stop()
 
     @override
@@ -135,6 +152,7 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
             self._is_moving = False
             self._position = -1
             self._requested_position = -1
+            self._intent_owner = None
         elif state.is_moving():
             self._is_moving = True
             if state.is_near_frame():
@@ -144,6 +162,7 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
                 self._is_moving = False
                 self._position = 0
                 self._requested_position = -1
+                self._intent_owner = None
             elif self._is_moving:
                 self._is_moving = False
                 if self._requested_position >= 0:
@@ -151,6 +170,7 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
                 else:
                     self._position = -1
                 self._requested_position = -1
+                self._intent_owner = None
 
         LOGGER.debug(
             f"[{self.device.name}] id={self.device.id}, state_code={state.name}, closed={self.device.closed}, _is_moving={self._is_moving}, _position={self._position}, _requested_position={self._requested_position}"

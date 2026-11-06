@@ -1,5 +1,7 @@
 """Direct tilt-entity contract tests, not HA setup or service-registry tests."""
 
+import asyncio
+from collections.abc import Coroutine
 from types import SimpleNamespace
 from typing import cast
 import unittest
@@ -14,7 +16,7 @@ from homeassistant.components.cover import (
 )
 
 from custom_components.smarwi.cover import SmarwiCover
-from custom_components.smarwi.device import SmarwiDevice, StateCode
+from custom_components.smarwi.device import SmarwiDevice, SmarwiDeviceProp, StateCode
 
 
 class CoverContractTests(unittest.IsolatedAsyncioTestCase):
@@ -143,6 +145,201 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.cover.current_cover_tilt_position)
         self.assertEqual(self.cover._requested_position, -1)
         self.assertEqual(self.cover._position, -1)
+
+    async def _pending_request(
+        self, action: Coroutine[None, None, None], command: AsyncMock
+    ) -> tuple[asyncio.Task[None], asyncio.Future[None]]:
+        started = asyncio.Event()
+        result: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+        async def pending(*args: object) -> None:
+            started.set()
+            await result
+
+        command.side_effect = pending
+        task = asyncio.create_task(action)
+
+        async def cleanup() -> None:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.addAsyncCleanup(cleanup)
+        await asyncio.wait_for(started.wait(), 5)
+        self.assertFalse(task.done())
+        return task, result
+
+    async def test_current_request_failure_clears_only_local_intent(self) -> None:
+        """All three actions discard failed intent, not telemetry or motion."""
+        for method, command, kwargs, target in (
+            (self.cover.async_open_cover_tilt, self.device.async_open, {}, 100),
+            (self.cover.async_close_cover_tilt, self.device.async_close, {}, 0),
+            (
+                self.cover.async_set_cover_tilt_position,
+                self.device.async_open,
+                {ATTR_TILT_POSITION: 30},
+                30,
+            ),
+        ):
+            for cancelled in (False, True):
+                with self.subTest(target=target, cancelled=cancelled):
+                    self.device.state_code = StateCode.OPENING
+                    self.cover._is_moving = True
+                    self.cover._position = 10
+                    task, result = await self._pending_request(
+                        method(**kwargs), command
+                    )
+                    self.assertEqual(self.cover._requested_position, target)
+                    error = RuntimeError("ACK failed after possible delivery")
+                    if cancelled:
+                        task.cancel("explicit cancellation")
+                        with self.assertRaises(asyncio.CancelledError) as caught:
+                            await task
+                        self.assertEqual(
+                            caught.exception.args, ("explicit cancellation",)
+                        )
+                    else:
+                        result.set_exception(error)
+                        with self.assertRaises(RuntimeError) as caught:
+                            await task
+                        self.assertIs(caught.exception, error)
+                    self.assertEqual(self.cover._requested_position, -1)
+                    self.assertEqual(self.cover._position, -1)
+                    self.assertIsNone(self.cover._intent_owner)
+                    self.assertTrue(self.cover._is_moving)
+                    self.assertIs(self.device.state_code, StateCode.OPENING)
+                    self.assertIs(self.device.closed, False)
+
+    async def test_same_target_supersession_uses_request_identity(self) -> None:
+        """Old failures/cancellation cannot clear a newer numerically equal request."""
+        for cancelled in (False, True):
+            with self.subTest(cancelled=cancelled):
+                self.cover._position = 10
+                first, first_result = await self._pending_request(
+                    self.cover.async_open_cover_tilt(), self.device.async_open
+                )
+                first_owner = self.cover._intent_owner
+                second, second_result = await self._pending_request(
+                    self.cover.async_open_cover_tilt(), self.device.async_open
+                )
+                second_owner = self.cover._intent_owner
+                if cancelled:
+                    first.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await first
+                else:
+                    error = RuntimeError("old failure")
+                    first_result.set_exception(error)
+                    with self.assertRaises(RuntimeError) as caught:
+                        await first
+                    self.assertIs(caught.exception, error)
+                self.assertEqual(self.cover._requested_position, 100)
+                self.assertEqual(self.cover._position, 10)
+                self.assertIs(self.cover._intent_owner, second_owner)
+                second_error = RuntimeError("new failure")
+                second_result.set_exception(second_error)
+                with self.assertRaises(RuntimeError) as caught:
+                    await second
+                self.assertIs(caught.exception, second_error)
+                self.assertEqual(self.cover._requested_position, -1)
+                self.assertIsNotNone(first_owner)
+                self.assertIsNotNone(second_owner)
+                self.assertIsNot(first_owner, second_owner)
+                self.assertEqual(self.cover._position, -1)
+                self.assertIsNone(self.cover._intent_owner)
+
+    async def test_late_success_after_new_failure_never_restores_intent(self) -> None:
+        """A late successful ACK cannot resurrect A after B failed."""
+        first, result = await self._pending_request(
+            self.cover.async_open_cover_tilt(), self.device.async_open
+        )
+        error = RuntimeError("new failure")
+        self.device.async_close.side_effect = error
+        with self.assertRaises(RuntimeError) as caught:
+            await self.cover.async_close_cover_tilt()
+        self.assertIs(caught.exception, error)
+        result.set_result(None)
+        await first
+        self.assertEqual(self.cover._requested_position, -1)
+        self.assertEqual(self.cover._position, -1)
+        self.assertIsNone(self.cover._intent_owner)
+
+    async def test_existing_invalidation_disowns_pending_request(self) -> None:
+        """Stop/error/actual idle cleanup disown ACKs, preserving terminal estimates."""
+        self.device.name = "Offline fixture"
+        with patch.object(self.cover, "async_write_ha_state"):
+            for invalidation in ("stop", "error", "closed_idle", "open_idle"):
+                for outcome in ("success", "failure", "cancel"):
+                    with self.subTest(invalidation=invalidation, outcome=outcome):
+                        self.device.closed = False
+                        self.device.state_code = StateCode.OPENING
+                        self.cover._is_moving = True
+                        self.cover._position = 10
+                        task, result = await self._pending_request(
+                            self.cover.async_open_cover_tilt(), self.device.async_open
+                        )
+                        self.assertIsNotNone(self.cover._intent_owner)
+                        if invalidation == "stop":
+                            await self.cover.async_stop_cover_tilt()
+                            expected = -1
+                        else:
+                            self.device.closed = invalidation == "closed_idle"
+                            self.device.state_code = (
+                                StateCode.ERR_MOVE_TIMEOUT
+                                if invalidation == "error"
+                                else StateCode.IDLE
+                            )
+                            await self.cover.async_handle_update(
+                                {SmarwiDeviceProp.STATE_CODE, SmarwiDeviceProp.CLOSED}
+                            )
+                            expected = {
+                                "error": -1,
+                                "closed_idle": 0,
+                                "open_idle": 100,
+                            }[invalidation]
+                        self.assertEqual(self.cover._position, expected)
+                        self.assertEqual(self.cover._requested_position, -1)
+                        self.assertIsNone(self.cover._intent_owner)
+                        if outcome == "success":
+                            result.set_result(None)
+                            await task
+                        elif outcome == "cancel":
+                            task.cancel()
+                            with self.assertRaises(asyncio.CancelledError):
+                                await task
+                        else:
+                            error = RuntimeError("late failure")
+                            result.set_exception(error)
+                            with self.assertRaises(RuntimeError) as caught:
+                                await task
+                            self.assertIs(caught.exception, error)
+                        self.assertEqual(self.cover._position, expected)
+                        self.assertEqual(self.cover._requested_position, -1)
+                        self.assertIsNone(self.cover._intent_owner)
+
+    async def test_noninvalidating_updates_and_idle_stop_preserve_owner(self) -> None:
+        """Keep inherited idle/release/availability limitations explicit."""
+        self.device.name = "Offline fixture"
+        task, result = await self._pending_request(
+            self.cover.async_open_cover_tilt(), self.device.async_open
+        )
+        owner = self.cover._intent_owner
+        self.assertIsNotNone(owner)
+        with patch.object(self.cover, "async_write_ha_state"):
+            await self.cover.async_stop_cover_tilt()
+            for props in (
+                set(),
+                {SmarwiDeviceProp.AVAILABLE},
+                {SmarwiDeviceProp.RIDGE_FIXED},
+            ):
+                await self.cover.async_handle_update(props)
+                self.assertIs(self.cover._intent_owner, owner)
+                self.assertEqual(self.cover._requested_position, 100)
+        self.device.async_stop.assert_not_awaited()
+        result.set_result(None)
+        await task
+        self.assertIs(self.cover._intent_owner, owner)
+        self.assertEqual(self.cover._requested_position, 100)
 
 
 if __name__ == "__main__":

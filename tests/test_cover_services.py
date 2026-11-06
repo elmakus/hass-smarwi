@@ -26,7 +26,7 @@ from homeassistant.components.cover import (
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceNotSupported
+from homeassistant.exceptions import HomeAssistantError, ServiceNotSupported
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import Entity
@@ -1519,3 +1519,111 @@ async def test_broker_disconnected_discovery_cannot_arm_online(
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
     await hass.async_block_till_done()
     assert device.available
+
+
+@pytest.mark.parametrize(
+    ("service", "data", "target", "payload"),
+    [
+        ("open_cover_tilt", {}, 100, "open;100"),
+        ("close_cover_tilt", {}, 0, "close"),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 30}, 30, "open;30"),
+    ],
+)
+@pytest.mark.parametrize("flow", ["current", "broker_loss", "closed_idle"])
+@pytest.mark.parametrize("cancelled", [False, True], ids=["failure", "cancellation"])
+async def test_failed_tilt_service_cleans_only_owned_local_intent(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    cover_id: str,
+    broker_connection: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    service: str,
+    data: dict[str, int],
+    target: int,
+    payload: str,
+    flow: str,
+    cancelled: bool,
+) -> None:
+    """Propagate failed ACKs, preserving raw telemetry and newer closed zero."""
+    cover = next(
+        platform.entities[cover_id]
+        for platform in async_get_platforms(hass, DOMAIN)
+        if cover_id in platform.entities
+    )
+    assert isinstance(cover, SmarwiCover)
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", "s:200")
+    )
+    await hass.async_block_till_done()
+    assert cover._position == 5
+    assert cover._is_moving
+    started = asyncio.Event()
+    updated = asyncio.Event()
+    original_update = cover.async_handle_update
+
+    async def observe_update(props: set[SmarwiDeviceProp]) -> None:
+        await original_update(props)
+        updated.set()
+
+    monkeypatch.setattr(cover, "async_handle_update", observe_update)
+    result: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    async def pending(*args: object, **kwargs: object) -> None:
+        started.set()
+        await result
+
+    publish = AsyncMock(side_effect=pending)
+    monkeypatch.setattr(mqtt_mock, "async_publish", publish)
+    action = asyncio.create_task(
+        hass.services.async_call(
+            "cover", service, {"entity_id": cover_id, **data}, blocking=True
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        assert not action.done()
+        assert cover._requested_position == target
+        owner = cover._intent_owner
+        assert owner is not None
+        if flow == "broker_loss":
+            broker_connection(False)
+            await asyncio.wait_for(updated.wait(), 5)
+            assert not cover.available
+            # Availability-only updates are not a new intent-invalidation policy.
+            assert cover._intent_owner is owner
+            assert cover._requested_position == target
+        elif flow == "closed_idle":
+            async_fire_mqtt_message(
+                hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+            )
+            await asyncio.wait_for(updated.wait(), 5)
+            assert cover._requested_position == -1
+            assert cover._position == 0
+            assert cover._intent_owner is None
+        snapshot = cover.device._status
+        values = snapshot.copy()
+        moving = cover._is_moving
+        if cancelled:
+            result.set_exception(asyncio.CancelledError("publish cancelled"))
+            with pytest.raises(asyncio.CancelledError) as caught_cancel:
+                await action
+            assert caught_cancel.value.args == ("publish cancelled",)
+        else:
+            error = HomeAssistantError("publish failed after possible delivery")
+            result.set_exception(error)
+            with pytest.raises(HomeAssistantError) as caught_error:
+                await action
+            assert caught_error.value is error
+        assert cover._requested_position == -1
+        assert cover._position == (0 if flow == "closed_idle" else -1)
+        assert cover._intent_owner is None
+        assert cover.device._status is snapshot
+        assert cover.device._status == values
+        assert cover._is_moving is moving
+        publish.assert_awaited_once_with(
+            f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None
+        )
+    finally:
+        if not result.done():
+            result.cancel()
+        await asyncio.gather(action, return_exceptions=True)
