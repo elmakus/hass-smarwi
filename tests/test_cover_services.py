@@ -1629,6 +1629,270 @@ async def test_failed_tilt_service_cleans_only_owned_local_intent(
         await asyncio.gather(action, return_exceptions=True)
 
 
+@pytest.mark.parametrize(
+    ("outcome", "service", "data", "target", "payload"),
+    [
+        ("success", "open_cover_tilt", {}, 100, "open;100"),
+        ("failure", "close_cover_tilt", {}, 0, "close"),
+        (
+            "cancellation",
+            "set_cover_tilt_position",
+            {ATTR_TILT_POSITION: 30},
+            30,
+            "open;30",
+        ),
+    ],
+)
+@pytest.mark.parametrize("reload", [True, False], ids=["reload", "rejected_unload"])
+async def test_pending_tilt_service_across_entry_unload(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    entity_registry: er.EntityRegistry,
+    dispatcher_spy: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+    service: str,
+    data: dict[str, int],
+    target: int,
+    payload: str,
+    reload: bool,
+) -> None:
+    """Late mocked publish results belong to the caller, not a replacement entity."""
+    old_cache = smarwi_entry.runtime_data
+    old_device = old_cache[DEVICE_ID]
+    old_cover = next(
+        platform.entities[cover_id]
+        for platform in async_get_platforms(hass, DOMAIN)
+        if cover_id in platform.entities
+    )
+    assert isinstance(old_cover, SmarwiCover)
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", "s:200")
+    )
+    await hass.async_block_till_done()
+    assert old_cover._position == 5
+    assert old_cover._is_moving
+    old_status = old_device._status
+    old_values = old_status.copy()
+    old_updates = AsyncMock(wraps=old_cover.async_handle_update)
+    monkeypatch.setattr(old_cover, "async_handle_update", old_updates)
+    started = asyncio.Event()
+    result: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    async def pending(
+        topic: str, command: str, *args: object, **kwargs: object
+    ) -> None:
+        # Gate only the original command; rediscovery and replacement commands proceed.
+        if topic == f"{BASE_TOPIC}/cmd" and command == payload and not started.is_set():
+            started.set()
+            await result
+
+    publish = AsyncMock(side_effect=pending)
+    monkeypatch.setattr(mqtt_mock, "async_publish", publish)
+    action = asyncio.create_task(
+        hass.services.async_call(
+            "cover", service, {"entity_id": cover_id, **data}, blocking=True
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        assert not action.done()
+        assert old_cover._requested_position == target
+        owner = old_cover._intent_owner
+        assert owner is not None
+        publish.assert_awaited_once_with(
+            f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None
+        )
+        if reload:
+            assert await asyncio.wait_for(
+                hass.config_entries.async_unload(smarwi_entry.entry_id), 5
+            )
+            assert smarwi_entry.state is ConfigEntryState.NOT_LOADED
+            assert getattr(smarwi_entry, "runtime_data", None) is None
+            assert all(
+                cover_id not in platform.entities
+                for platform in async_get_platforms(hass, DOMAIN)
+            )
+            assert not action.done()
+            assert await asyncio.wait_for(
+                hass.config_entries.async_reload(smarwi_entry.entry_id), 5
+            )
+            assert smarwi_entry.state is ConfigEntryState.LOADED
+            assert smarwi_entry.runtime_data == {}
+            assert smarwi_entry.runtime_data is not old_cache
+            initialized = asyncio.Event()
+            attached = asyncio.Event()
+            online = asyncio.Event()
+            real_init = SmarwiDevice.async_init
+            real_added = SmarwiCover.async_added_to_hass
+            real_online = SmarwiDevice._async_handle_online_message
+
+            async def observe_init(device: SmarwiDevice) -> None:
+                await real_init(device)
+                initialized.set()
+
+            async def observe_added(cover: SmarwiCover) -> None:
+                await real_added(cover)
+                attached.set()
+
+            async def observe_online(
+                device: SmarwiDevice, msg: mqtt.ReceiveMessage
+            ) -> None:
+                await real_online(device, msg)
+                online.set()
+
+            monkeypatch.setattr(SmarwiDevice, "async_init", observe_init)
+            monkeypatch.setattr(SmarwiCover, "async_added_to_hass", observe_added)
+            monkeypatch.setattr(
+                SmarwiDevice, "_async_handle_online_message", observe_online
+            )
+            async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+            await asyncio.wait_for(initialized.wait(), 5)
+            async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+            await asyncio.wait_for(attached.wait(), 5)
+            async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+            await asyncio.wait_for(online.wait(), 5)
+        else:
+            # Reject before any platform removal; partial unload failures are separate.
+            with monkeypatch.context() as patch:
+                patch.setattr(
+                    hass.config_entries,
+                    "async_unload_platforms",
+                    AsyncMock(return_value=False),
+                )
+                assert not await asyncio.wait_for(
+                    hass.config_entries.async_unload(smarwi_entry.entry_id), 5
+                )
+            assert smarwi_entry.state is ConfigEntryState.FAILED_UNLOAD
+            assert smarwi_entry.runtime_data is old_cache
+
+        covers = [
+            platform.entities[cover_id]
+            for platform in async_get_platforms(hass, DOMAIN)
+            if cover_id in platform.entities
+        ]
+        assert len(covers) == 1
+        cover = covers[0]
+        assert isinstance(cover, SmarwiCover)
+        cache = smarwi_entry.runtime_data
+        device = cache[DEVICE_ID]
+        assert set(cache) == {DEVICE_ID}
+        assert cover.device is device
+        assert (cover is not old_cover) is reload
+        assert (device is not old_device) is reload
+        assert (
+            entity_registry.async_get_entity_id("cover", DOMAIN, f"{DEVICE_ID}_cover")
+            == cover_id
+        )
+        assert not action.done()
+        assert old_cover._intent_owner is owner
+        assert old_cover._requested_position == target
+        old_updates.assert_not_awaited()
+        old_writes = Mock(wraps=old_cover.async_write_ha_state)
+        monkeypatch.setattr(old_cover, "async_write_ha_state", old_writes)
+        if reload:
+            # Same target, new entity and owner: old cleanup must not clear this intent.
+            await hass.services.async_call(
+                "cover", service, {"entity_id": cover_id, **data}, blocking=True
+            )
+            assert cover._requested_position == target
+            assert cover._intent_owner is not None
+            assert cover._intent_owner is not owner
+        replacement_owner = cover._intent_owner
+        snapshot = device._status
+        values = snapshot.copy()
+        before = hass.states.get(cover_id)
+        assert before is not None
+        assert before.attributes["device_class"] == CoverDeviceClass.WINDOW
+        assert before.attributes["supported_features"] == (
+            CoverEntityFeature.OPEN_TILT
+            | CoverEntityFeature.CLOSE_TILT
+            | CoverEntityFeature.SET_TILT_POSITION
+            | CoverEntityFeature.STOP_TILT
+        )
+        expected_publishes = [
+            call(f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None)
+        ]
+        if reload:
+            expected_publishes += [
+                call(
+                    f"{BASE_TOPIC}/cmd", "lcfa", 2, False, message_expiry_interval=None
+                ),
+                call(
+                    f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None
+                ),
+            ]
+        assert publish.await_args_list == expected_publishes
+        if outcome == "success":
+            result.set_result(None)
+            await asyncio.wait_for(action, 5)
+            assert old_cover._intent_owner is owner
+            assert old_cover._requested_position == target
+            assert old_cover._position == 5
+        elif outcome == "failure":
+            error = HomeAssistantError("publish failed after possible delivery")
+            result.set_exception(error)
+            with pytest.raises(HomeAssistantError) as caught_error:
+                await asyncio.wait_for(action, 5)
+            assert caught_error.value is error
+        else:
+            result.set_exception(asyncio.CancelledError("publish cancelled"))
+            with pytest.raises(asyncio.CancelledError) as caught_cancel:
+                await asyncio.wait_for(action, 5)
+            assert caught_cancel.value.args == ("publish cancelled",)
+        await hass.async_block_till_done()
+        assert smarwi_entry.runtime_data is cache
+        assert cache[DEVICE_ID] is device
+        if outcome != "success":
+            assert old_cover._intent_owner is None
+            assert old_cover._requested_position == -1
+            assert old_cover._position == -1
+        assert old_cover._is_moving
+        assert old_device._status is old_status
+        assert old_device._status == old_values
+        assert device._status is snapshot
+        assert device._status == values
+        assert hass.states.get(cover_id) is before
+        old_writes.assert_not_called()
+        old_updates.assert_not_awaited()
+        if reload:
+            assert cover._intent_owner is replacement_owner
+            assert cover._requested_position == target
+        updates = AsyncMock(wraps=cover.async_handle_update)
+        writes = Mock(wraps=cover.async_write_ha_state)
+        monkeypatch.setattr(cover, "async_handle_update", updates)
+        monkeypatch.setattr(cover, "async_write_ha_state", writes)
+        dispatcher_spy.reset_mock()
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+        )
+        await hass.async_block_till_done()
+        dispatcher_spy.assert_called_once_with(
+            hass,
+            device.signal_update,
+            {SmarwiDeviceProp.CLOSED}
+            | ({SmarwiDeviceProp.STATE_CODE} if not reload else set()),
+        )
+        updates.assert_awaited_once()
+        writes.assert_called_once_with()
+        after = hass.states.get(cover_id)
+        assert after is not None and after.state == "closed"
+        assert after.attributes[ATTR_CURRENT_TILT_POSITION] == 0
+        if reload:
+            old_updates.assert_not_awaited()
+            old_writes.assert_not_called()
+            assert old_device._status is old_status
+        assert publish.await_args_list == expected_publishes
+    finally:
+        if not result.done():
+            result.cancel()
+        if not action.done():
+            action.cancel()
+        await asyncio.gather(action, return_exceptions=True)
+
+
 @pytest.mark.parametrize("boundary", [1, 2, 3])
 @pytest.mark.parametrize("cancel", [False, True])
 @pytest.mark.parametrize("retry", [False, True])
