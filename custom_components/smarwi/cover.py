@@ -93,7 +93,8 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
     @property  # superclass uses @cached_property, but that doesn't work here [1]
     @override
     def current_cover_tilt_position(self) -> int | None:  # pyright:ignore[reportIncompatibleVariableOverride]
-        return self._position if self._position >= 0 else None
+        # Binary closed telemetry (including cache), not targets, establishes zero.
+        return 0 if self.device.closed is True else None
 
     @override
     async def async_open_cover_tilt(self, **kwargs: Any) -> None:  # pyright:ignore[reportAny]

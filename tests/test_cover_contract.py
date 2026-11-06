@@ -26,7 +26,7 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
             id="offline_fixture",
             basic_device_info={},
             ridge_fixed=True,
-            closed=True,
+            closed=False,
             state_code=StateCode.IDLE,
             async_open=AsyncMock(),
             async_close=AsyncMock(),
@@ -81,20 +81,24 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(getattr(SmarwiCover, name), getattr(CoverEntity, name))
 
     def test_tilt_position_does_not_become_standard_position(self) -> None:
-        """Report values through the tilt property, leaving unknown tilt as None."""
-        self.assertIsNone(self.cover.current_cover_tilt_position)
-        self.assertIsNone(self.cover.current_cover_position)
-        for position in (0, 10, 100):
-            with self.subTest(position=position):
-                self.cover._position = position
-                self.assertEqual(self.cover.current_cover_tilt_position, position)
-                self.assertIsNone(self.cover.current_cover_position)
+        """Report only binary closed zero, never private estimates as feedback."""
+        for closed in (True, False, None):
+            self.device.closed = closed
+            for position in (-1, 0, 5, 30, 100):
+                with self.subTest(closed=closed, position=position):
+                    self.cover._position = position
+                    self.assertEqual(
+                        self.cover.current_cover_tilt_position,
+                        0 if closed is True else None,
+                    )
+                    self.assertIsNone(self.cover.current_cover_position)
 
     def test_closed_state_tracks_the_device(self) -> None:
         """Tilt-only features retain the cover's observed closed-state property."""
-        self.assertTrue(self.cover.is_closed)
-        self.device.closed = False
         self.assertFalse(self.cover.is_closed)
+        self.device.closed = True
+        self.assertTrue(self.cover.is_closed)
+        self.assertEqual(self.cover.current_cover_tilt_position, 0)
 
     async def test_open_tilt_delegates_once(self) -> None:
         """The native open-tilt method delegates to the device open command."""
@@ -129,12 +133,16 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
         self.device.state_code = StateCode.OPENING
         self.cover._position = 10
         self.cover._requested_position = 30
+        self.assertEqual(self.cover._position, 10)
+        self.assertEqual(self.cover._requested_position, 30)
+        self.assertIsNone(self.cover.current_cover_tilt_position)
         await self.cover.async_stop_cover_tilt()
         self.device.async_stop.assert_awaited_once_with()
         self.device.async_open.assert_not_awaited()
         self.device.async_close.assert_not_awaited()
         self.assertIsNone(self.cover.current_cover_tilt_position)
         self.assertEqual(self.cover._requested_position, -1)
+        self.assertEqual(self.cover._position, -1)
 
 
 if __name__ == "__main__":
