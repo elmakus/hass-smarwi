@@ -279,6 +279,15 @@ class SmarwiDevice:
         }
         if not status:
             return
+        try:
+            _ = int(status.get(SmarwiDeviceProp.STATE_CODE) or 0)
+            if SmarwiDeviceProp.RSSI in status:
+                _ = int(status[SmarwiDeviceProp.RSSI])
+            if SmarwiDeviceProp.IP_ADDRESS in status:
+                _ = parse_ipv4(int(status[SmarwiDeviceProp.IP_ADDRESS]))
+        except (ValueError, struct.error):
+            LOGGER.warning("Ignoring malformed SMARWI status message")
+            return
         changed_props = {
             name
             for name in SmarwiDeviceProp
