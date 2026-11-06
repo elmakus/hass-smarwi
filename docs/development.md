@@ -21,19 +21,19 @@ The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPE
 - Keep runtime device maps owned by typed config entries, with native unload/reload cleanup and tests for independent entries and bounded setup/unload failures. If MQTT client readiness returns false, use native setup retry before allocating runtime data or subscriptions.
 - Roll back failed/cancelled device subscription initialization without poisoning discovery. Preserve the provisional duplicate guard; run MQTT handlers only after all acquisitions succeed, and suppress handlers from abandoned attempts. Drain each returned native cleanup handle once.
 
-All public-interface tests use official HA fixtures and mocked Paho transport with explicit network guards. No HA server starts or live controller is installed. Passing them does not prove device execution, target accuracy, broker replay boundaries or safe physical Stop/holding. Retained telemetry remains last known.
+The guarded public-interface unit tests use official HA fixtures and mocked Paho transport with explicit network guards. No HA server starts or live controller is installed. Passing them does not prove device execution, target accuracy, broker replay boundaries or safe physical Stop/holding. Retained telemetry remains last known.
 
 Private motion/direction estimates remain inherited and unverified. The `OPENING` phase cannot simply be equated to physical opening toward every target. Stop-before-motion, unchanged idle telemetry, release/disconnect intent invalidation, settings transactions and physical recovery remain separate gates. Native HA tilt-toggle opens at reported zero and closes when tilt is unknown; removing stale zero can change that default branch. Use explicit native actions when intent matters. No dashboard or standard-action alias compensates for these limits.
 
 ## Latest combined local verification (2026-11-06)
 
-The combined source checkpoint passes **214 tests and 57 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **227 tests and 95 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. This includes 13 dependency-free hosted-harness helper tests, not an executed hosted acceptance run. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
 python3 -m unittest discover -s tests -p test_package.py -v
 .venv-tests/bin/ruff check .
-.venv-tests/bin/ruff format --check scripts/build_release.py tests
+.venv-tests/bin/ruff format --check scripts tests
 .venv/bin/uv tool run --offline --from basedpyright==1.10.4 basedpyright --pythonpath .venv/bin/python --project pyproject.toml
 .venv/bin/uv pip check --offline --python .venv/bin/python
 git diff --check
@@ -41,7 +41,7 @@ git diff --check
 
 The ten package unittests, pinned strict checker (zero errors/warnings), Ruff, scoped formatting and installed-dependency check (122 compatible packages) pass. The offline tool command assumes its pinned tool is already cached; initial dependency/tool installation can need network access. Reuse existing environments and do not start `scripts/develop`.
 
-Main independently reran the combined checks for the MQTT-client setup-retry correction. Two fresh independent reviewers found no blockers; they inspected source and evidence but did not execute tests. Active primary-server diagnostics checked both changed Python files with zero findings and no inconclusive outcomes. The earlier 14-file all-server recheck was push-only/inconclusive, not a universal clean-LSP result. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result remains independently confirmed for its production-module scope, not test-file coverage.
+Main independently reran the combined checks after adding the hosted acceptance harness. Two fresh independent reviewers found no blockers in the harness; they inspected source and evidence but did not execute tests. Main's active primary-server diagnostics checked its three Python and two workflow files with zero findings and no inconclusive outcomes. Auxiliary all-server findings and earlier inconclusive results remain separate, not a universal clean-LSP claim. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result covers production modules, not the new scripts or tests. Stock images, containment and native-runtime behavior still require the separate authorized hosted run.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
 
@@ -69,19 +69,103 @@ Three guarded public lifecycle regressions cover native scheduled recovery witho
 
 The tests inject documented helper false/true results, not a real timeout, ordinary startup race or broker outage. MQTT dependency setup normally runs first; an already loaded MQTT client passes the actual helper without requiring broker connectivity. Retry does not repair missing, disabled or fatally misconfigured MQTT. Other HA versions and physical/broker acceptance remain unverified.
 
-## Consistent formatting
+## Manual synthetic hosted acceptance
 
-Use Ruff `0.14.3`, pinned in `requirements.txt`, for the fork-maintained packaging script and tests. Both development requirement files now target HA `2026.11.0`; do not replace a working environment or install the historical HA 2024 pins/stubs from older revisions into it. Run these commands before committing:
+The separate **Synthetic hosted acceptance** workflow is `workflow_dispatch` only,
+on one standard `ubuntu-24.04` GitHub-hosted VM, with read-only repository
+permissions, no persisted checkout credentials, a 60-minute timeout and serialized
+runs. It is not run by push, pull request, schedule or release events. Dispatch
+requires the operator's specific synthetic-runtime/publication approval. Do not run
+its orchestrator locally or point it at an existing HA installation or broker.
+
+It builds the unchanged current flat-ZIP builder against exact tracked source
+**A `43c22f5a3c427aa46040f175f770d3dfd0f016b8`** and
+**B `635017321dab8c29bbeff5f5223bfe9461cdffd1`**. Both manifests must remain
+byte-identical `0.4.0.dev0`; archive/source/install bytes and the unchanged license
+are checked. Integration replacement removes stale files. No production source,
+manifest, HACS metadata, dependency, tag or release changes enable this test.
+
+Host staging pulls stock official `ghcr.io/home-assistant/home-assistant:2026.11.0`
+and `eclipse-mosquitto:2.0`, resolves immutable digests/local image IDs and uses
+`--pull=never` for runtime creation. Actual Docker, Python, HA, Paho, aiohttp,
+Supervisor-client dependency and Mosquitto versions are recorded, not guessed.
+Missing offline image dependencies, unavailable images or incompatible safety
+controls block acceptance; there is no pip, bridge, proxy or internet fallback.
+
+Only inert processes start before preflight. HA's inert PID 1 owns a `none`
+network namespace; the inert broker joins `container:<exact HA ID>`. Both use the
+runner's nonroot numeric UID/GID (so private stopped checkpoints can be copied
+without root), dropped capabilities, no-new-privileges, read-only roots, bounded
+resources, explicit fresh bind mounts and `/tmp` scratch. Preflight verifies the
+actual IDs/image settings, namespace identity, only `lo`, no usable external IPv4
+or IPv6 route, exact environment/mount allowlists, process UID/capabilities and no
+initial listeners. No host ports, host namespaces, devices, host sockets, checkout
+`.git`, home directory, runner tokens or credential stores enter the containers.
+Containment is rechecked before every application stage and after clean stops;
+the namespace-owning container stays alive throughout. This tests **application**
+stop/start, not Docker-container restart, and assumes a trusted runner/kernel/Docker.
+
+Inside that namespace, real native onboarding creates a synthetic HA-only admin;
+local OAuth code/refresh grants, authenticated config flows, registry/state APIs,
+native reload and a native tilt service run through actual HA. No fabricated
+`.storage`, disabled authentication, injected entity state or mocked Paho is used.
+Clients contact only `127.0.0.1`; credentials and private diagnostics stay in the
+disposable sandbox. The core-config onboarding step that schedules unrelated
+internet services is deliberately not completed. No Marketplace account is used.
+
+The single sequence installs A, discovers `offline_remote` / `offline_serial`,
+checks one serial-derived `WINDOW` cover and exactly four tilt features (240),
+closed/zero and nonclosed/unknown tilt, one `open;1` captured at the synthetic
+broker, and reload identity/no duplicates. After clean HA/broker application stops,
+it checkpoints complete matching HA configuration/state/integration plus broker
+configuration/data/logs. It replaces only integration bytes with B while stopped,
+repeats the smoke, stops both, restores the complete matching A checkpoint in the
+same mounted directories and repeats again. Automatically requested `lcfa` reads
+are tolerated; no Stop, Fix, settings writes or physical movement policy is tested.
+
+This is **manual same-version code replacement and matching sandbox checkpoint
+recovery**, not native HACS/Marketplace update/downgrade, HA backup restore,
+arbitrary reverse migration, replay/freshness, supported-version-range or physical
+acceptance. Firmware is not applicable. Native distribution and hardware release
+gates remain open. Adding the workflow is not evidence that any hosted run passed.
+
+Only `hosted-evidence/report.json` is uploaded, with **seven-day retention**.
+Workflow source, job status and allowlisted sanitized artifacts are public in a
+public repository; seven days is artifact retention, not a promise to erase source
+or job logs. Evidence contains stage verdicts, versions/digests, package/checkpoint
+hashes, containment/assertion/restore/cleanup results and hashed synthetic registry
+identity. Raw auth, HTTP, storage, inspect output, logs and checkpoint snapshots
+are never uploaded. Exceptions do not print private command output. Cleanup runs
+in `finally`, including termination signals, removes only exact job-created IDs
+and scratch, attempts all owned resources on failure and never prunes the host.
+Forced VM loss/SIGKILL cannot run Python cleanup; the disposable hosted VM is the
+final disposal boundary. A failed cleanup is a failed job, never a pass.
+
+Dependency-free local helper checks (imports cannot start apps/containers):
 
 ```sh
-ruff format scripts/build_release.py tests
-ruff format --check scripts/build_release.py tests
+python3 -m unittest discover -s tests -p test_hosted_acceptance.py -v
+```
+
+These cover unsafe archives/links, stale-byte removal, restore root-inode
+preservation, containment rejection, evidence allowlisting and failure cleanup.
+They do not prove image compatibility or the native flow. Hosted startup, stock
+image nonroot/read-only compatibility and offline API behavior remain runtime
+gates: preserve guards and report blocked/failed rather than relaxing containment.
+
+## Consistent formatting
+
+Use Ruff `0.14.3`, pinned in `requirements.txt`, for the fork-maintained Python scripts and tests. Both development requirement files now target HA `2026.11.0`; do not replace a working environment or install the historical HA 2024 pins/stubs from older revisions into it. Run these commands before committing:
+
+```sh
+ruff format scripts tests
+ruff format --check scripts tests
 ruff check .
 ```
 
 The required **Linter** CI job runs both lint and the same format check. Formatting is therefore checked, not silently rewritten during CI. The committed files already use this format; editor reformatting with the project settings should leave no diff. `.editorconfig` explicitly keeps Python scripts space-indented while preserving the existing shell-script tab rule. Do not hide recurring formatter changes with stash or assume-unchanged flags: format and commit them with the relevant topic.
 
-The formatting check deliberately covers only `scripts/build_release.py` and `tests/`; it does not reformat inherited production integration files or change actuator behavior.
+The formatting check deliberately covers only Python files in `scripts/` and `tests/`; it does not reformat inherited production integration files or change actuator behavior.
 
 ## Offline package checks
 
