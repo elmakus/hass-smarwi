@@ -3,6 +3,7 @@
 from typing import Any  # pyright:ignore[reportAny]
 from typing_extensions import override
 
+from homeassistant.components.mqtt import valid_subscribe_topic
 from homeassistant.config_entries import (
     ConfigFlow,
     ConfigFlowResult,
@@ -36,8 +37,27 @@ class SmarwiConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle a flow initialized by the user."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title=NAME, data=user_input)
+            remote_id: str = user_input[CONF_REMOTE_ID]
+            try:
+                if (
+                    not remote_id
+                    or remote_id != remote_id.strip()
+                    or any(char in remote_id for char in "/+#")
+                ):
+                    raise probatio.Invalid(
+                        "Remote ID must be one literal topic segment"
+                    )
+                _ = valid_subscribe_topic(f"ion/{remote_id}/+/online")
+            except probatio.Invalid:
+                errors[CONF_REMOTE_ID] = "invalid_remote_id"
+            else:
+                _ = await self.async_set_unique_id(remote_id)
+                self._abort_if_unique_id_configured()
+                self._async_abort_entries_match({CONF_REMOTE_ID: remote_id})
+                return self.async_create_entry(title=NAME, data=user_input)
 
-        # If there is no user input, show the form again.
-        return self.async_show_form(step_id="user", data_schema=DATA_SCHEMA)
+        return self.async_show_form(
+            step_id="user", data_schema=DATA_SCHEMA, errors=errors
+        )

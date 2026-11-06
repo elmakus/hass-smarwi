@@ -1,5 +1,11 @@
 {
   "config": {
+    "error": {
+      "invalid_remote_id": "Enter a nonempty Remote ID with no leading or trailing whitespace, /, +, #, or control characters. It must form a valid UTF-8 MQTT topic of at most 65535 bytes including ion/ and /+/online."
+    },
+    "abort": {
+      "already_configured": "This Remote ID is already configured."
+    },
     "step": {
       "user": {
         "description": "Before adding this integration, set up the MQTT integration in Home Assistant and configure your SMARWI devices to use your local MQTT broker.",
