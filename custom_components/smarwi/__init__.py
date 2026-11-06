@@ -44,8 +44,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     async def device_discovery(msg: mqtt.ReceiveMessage) -> None:
-        # Topic looks like ion/<remote_id>/%<device_id>/status.
-        device_id = msg.topic.split("/")[2].removeprefix("%")
+        # Topic looks like ion/<remote_id>/%<device_id>/online.
+        device_segment = msg.topic.split("/")[2]
+        if not device_segment.startswith("%") or len(device_segment) == 1:
+            LOGGER.warning("Ignoring malformed SMARWI discovery topic")
+            return
+        device_id = device_segment[1:]
 
         # Check if this device is already known
         if device_id in hass_data:

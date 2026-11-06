@@ -380,6 +380,50 @@ async def test_standard_services_are_not_tilt_aliases(
     mqtt_mock.async_publish.assert_not_called()
 
 
+@pytest.mark.parametrize("segment", ["", "unprefixed_serial", "%"])
+async def test_invalid_discovery_segment_does_not_create_a_device(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    dispatcher_spy: Mock,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    segment: str,
+) -> None:
+    """Require the documented percent marker and a nonempty serial segment."""
+    devices = hass.data[DOMAIN][smarwi_entry.entry_id]
+    previous_devices = devices.copy()
+    constructor_spy = Mock(wraps=SmarwiDevice)
+    monkeypatch.setattr("custom_components.smarwi.SmarwiDevice", constructor_spy)
+    dispatcher_spy.reset_mock()
+    caplog.clear()
+    async_fire_mqtt_message(hass, f"ion/{REMOTE_ID}/{segment}/online", "1")
+    await hass.async_block_till_done()
+    assert devices == previous_devices
+    constructor_spy.assert_not_called()
+    dispatcher_spy.assert_not_called()
+    assert all(record.levelno < logging.ERROR for record in caplog.records)
+    mqtt_mock.async_publish.assert_not_called()
+
+    serial = "offline_discovery_recovery"
+    topic = f"ion/{REMOTE_ID}/%{serial}"
+    async_fire_mqtt_message(hass, f"{topic}/online", "1")
+    await hass.async_block_till_done()
+    async_fire_mqtt_message(hass, f"{topic}/status", STATUS)
+    await hass.async_block_till_done()
+    assert serial in devices
+    assert entity_registry.async_get_entity_id("cover", DOMAIN, f"{serial}_cover")
+    constructor_spy.assert_called_once()
+    mqtt_mock.async_publish.assert_not_called()
+    async_fire_mqtt_message(hass, f"{topic}/online", "1")
+    await hass.async_block_till_done()
+    constructor_spy.assert_called_once()
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{topic}/cmd", "lcfa", 2, False, message_expiry_interval=None
+    )
+
+
 async def test_closed_update_reports_zero_tilt_only(
     hass: HomeAssistant, cover_id: str
 ) -> None:
