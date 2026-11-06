@@ -111,6 +111,22 @@ def cover_id(smarwi_entry: MockConfigEntry, entity_registry: er.EntityRegistry) 
     return entity_id
 
 
+def test_config_flow_schema_uses_home_assistant_validation() -> None:
+    """Keep the native schema and selector boundary covered without entry setup."""
+    from custom_components.smarwi.config_flow import DATA_SCHEMA
+
+    assert isinstance(DATA_SCHEMA, probatio.Schema)
+    assert DATA_SCHEMA({CONF_REMOTE_ID: REMOTE_ID}) == {CONF_REMOTE_ID: REMOTE_ID}
+    for invalid in (
+        {},
+        {CONF_REMOTE_ID: None},
+        {CONF_REMOTE_ID: 1},
+        {CONF_REMOTE_ID: []},
+    ):
+        with pytest.raises(probatio.Invalid):
+            DATA_SCHEMA(invalid)
+
+
 async def test_state_machine_has_only_window_tilt_features(
     hass: HomeAssistant, cover_id: str
 ) -> None:

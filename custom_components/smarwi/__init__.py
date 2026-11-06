@@ -59,7 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Handle removal of an entry."""
-    hass_data: dict[str, SmarwiDevice] = hass.data[DOMAIN]  # pyright:ignore[reportAny]
+    hass_data: dict[str, SmarwiDevice] = hass.data[DOMAIN]
 
     if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         del hass_data[entry.entry_id]

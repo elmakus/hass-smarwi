@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from typing_extensions import override
 
-from homeassistant.helpers.dispatcher import async_dispatcher_connect  # pyright:ignore[reportUnknownVariableType]
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
 from .device import SmarwiDeviceProp, SmarwiDevice

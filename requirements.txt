@@ -1,5 +1,4 @@
 basedpyright==1.10.4
 colorlog>=6.7.0
-homeassistant==2024.8.0
-homeassistant-stubs==2024.8.0
+homeassistant==2026.11.0
 ruff==0.14.3
