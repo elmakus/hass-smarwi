@@ -5,21 +5,21 @@ from typing_extensions import override
 
 from homeassistant.config_entries import (
     ConfigFlow,
-    CONN_CLASS_LOCAL_PUSH,
     ConfigFlowResult,
 )
 from homeassistant.helpers.selector import (
-    TextSelector,
+    # HA's selector registry erases the concrete generic type.
+    TextSelector,  # pyright:ignore[reportUnknownVariableType]
     TextSelectorConfig,
     TextSelectorType,
 )
-import voluptuous as vol
+import probatio
 
 from .const import CONF_REMOTE_ID, DOMAIN, NAME
 
-DATA_SCHEMA = vol.Schema(
+DATA_SCHEMA = probatio.Schema(
     {
-        vol.Required(CONF_REMOTE_ID): TextSelector(
+        probatio.Required(CONF_REMOTE_ID): TextSelector(
             TextSelectorConfig(type=TextSelectorType.TEXT),
         ),
     }
@@ -30,7 +30,6 @@ class SmarwiConfigFlow(ConfigFlow, domain=DOMAIN):
     """Config flow for SMARWI integration."""
 
     VERSION = 1
-    CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     @override
     async def async_step_user(
