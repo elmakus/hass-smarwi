@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: 2024 Jakub Jirutka <jakub@jirutka.cz>
 from __future__ import annotations
 
+from asyncio import CancelledError, Event
+from collections.abc import Awaitable, Callable
 from enum import IntEnum, StrEnum
 from functools import cached_property
 import socket
@@ -264,19 +266,48 @@ class SmarwiDevice:
 
     async def async_init(self) -> None:
         """Connect to the device."""
-        for topic, handler in (
-            ("status", self._async_handle_status_message),
-            ("online", self._async_handle_online_message),
-            ("config/advanced", self.finetune_settings.async_handle_update),
-        ):
-            self._config_entry.async_on_unload(
-                await mqtt.async_subscribe(
+        ready = Event()
+        closed = False
+        unsubscribers: list[Callable[[], None]] = []
+
+        @callback
+        def cleanup() -> None:
+            nonlocal closed
+            closed = True
+            ready.set()
+            while unsubscribers:
+                unsubscribers.pop()()
+
+        self._config_entry.async_on_unload(cleanup)
+        try:
+            for topic, handler in (
+                ("status", self._async_handle_status_message),
+                ("online", self._async_handle_online_message),
+                ("config/advanced", self.finetune_settings.async_handle_update),
+            ):
+                # Keep retained/queued callbacks off provisional or closed devices.
+                async def handle_message(
+                    msg: mqtt.ReceiveMessage,
+                    handler: Callable[[mqtt.ReceiveMessage], Awaitable[None]] = handler,
+                ) -> None:
+                    _ = await ready.wait()
+                    if not closed:
+                        await handler(msg)
+
+                unsubscribe = await mqtt.async_subscribe(
                     self._hass,
                     f"{self._base_topic}/{topic}",
-                    handler,
+                    handle_message,
                     qos=1,
                 )
-            )
+                if closed:
+                    unsubscribe()
+                    raise CancelledError
+                unsubscribers.append(unsubscribe)
+        except (Exception, CancelledError):
+            cleanup()
+            raise
+        ready.set()
 
     async def _async_handle_status_message(self, msg: mqtt.ReceiveMessage) -> None:
         try:
