@@ -27,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-06)
 
-The combined source checkpoint passes **230 tests and 95 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. This includes 16 dependency-free hosted-harness helper tests, not an executed hosted acceptance run. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **230 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -41,7 +41,7 @@ git diff --check
 
 The ten package unittests, pinned strict checker (zero errors/warnings), Ruff, scoped formatting and installed-dependency check (122 compatible packages) pass. The offline tool command assumes its pinned tool is already cached; initial dependency/tool installation can need network access. Reuse existing environments and do not start `scripts/develop`.
 
-Main independently reran the combined checks after adding the hosted acceptance harness. Two fresh independent reviewers found no blockers in the harness; they inspected source and evidence but did not execute tests. Main's active primary-server diagnostics checked its three Python and two workflow files with zero findings and no inconclusive outcomes. Auxiliary all-server findings and earlier inconclusive results remain separate, not a universal clean-LSP claim. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result covers production modules, not the new scripts or tests. Stock images, containment and native-runtime behavior still require the separate authorized hosted run.
+Main independently reran the combined checks after adding the hosted acceptance harness. Two fresh independent reviewers found no blockers in the harness; they inspected source and evidence but did not execute tests. Main's active primary-server diagnostics checked its three Python and two workflow files with zero findings and no inconclusive outcomes. Auxiliary all-server findings and earlier inconclusive results remain separate, not a universal clean-LSP claim. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result covers production modules, not the new scripts or tests. Local checks do not establish the separate authorized hosted-runtime results recorded below.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
 
@@ -116,17 +116,21 @@ internet services is deliberately not completed. No Marketplace account is used.
 The single sequence installs A, discovers `offline_remote` / `offline_serial`,
 checks one serial-derived `WINDOW` cover and exactly four tilt features (240),
 closed/zero and nonclosed/unknown tilt, one `open;1` captured at the synthetic
-broker, and reload identity/no duplicates. After clean HA/broker application stops,
-it checkpoints complete matching HA configuration/state/integration plus broker
-configuration/data/logs. It replaces only integration bytes with B while stopped,
-repeats the smoke, stops both, restores the complete matching A checkpoint in the
-same mounted directories and repeats again. Automatically requested `lcfa` reads
-are tolerated; no Stop, Fix, settings writes or physical movement policy is tested.
+broker, and reload identity/no duplicates. A finishes observed closed; after clean
+HA/broker stops, its complete configuration/state/integration and broker trees are
+checkpointed. B replaces only integration bytes, repeats the smoke and finishes
+observed open. Both stop; matching A state is restored into the same mounted roots.
+Before publishing any new fixture telemetry, restored A must receive the retained
+closed status at the test client and report the existing cover as closed/zero.
+Only then does its ordinary smoke continue. This distinguishes saved A from later
+B and tests one bounded retained-state recovery, not freshness or arbitrary replay.
+Automatically requested `lcfa` reads are tolerated; no Stop, Fix, settings writes
+or physical movement policy is tested.
 
 This is **manual same-version code replacement and matching sandbox checkpoint
 recovery**, not native HACS/Marketplace update/downgrade, HA backup restore,
-arbitrary reverse migration, replay/freshness, supported-version-range or physical
-acceptance. Firmware is not applicable. Native distribution and hardware release
+arbitrary reverse migration, general replay/freshness, supported-version-range or
+physical acceptance. Firmware is not applicable. Native distribution and hardware release
 gates remain open. Adding the workflow is not evidence that any hosted run passed.
 
 Only `hosted-evidence/report.json` is uploaded, with **seven-day retention**.
@@ -148,10 +152,45 @@ python3 -m unittest discover -s tests -p test_hosted_acceptance.py -v
 ```
 
 These cover unsafe archives/links, stale-byte removal, restore root-inode
-preservation, containment rejection, evidence allowlisting and failure cleanup.
-They do not prove image compatibility or the native flow. Hosted startup, stock
-image nonroot/read-only compatibility and offline API behavior remain runtime
-gates: preserve guards and report blocked/failed rather than relaxing containment.
+preservation, containment rejection, stage-specific evidence and failure cleanup.
+They do not prove image compatibility or the native flow. Each hosted rerun must
+check stock-image compatibility, containment and offline native behavior; preserve
+guards and report blocked/failed rather than relaxing them.
+
+### Scope and reuse decision
+
+Keep this as a fixed historical gate, not a generic release framework. Its pinned
+A/B refs intentionally do not test current main or future releases automatically.
+Future releases need their own explicit version/source acceptance matrix.
+
+The existing builder and official in-process HA fixtures are already reused.
+Hosted sentinels add installed bytes and real native API/MQTT transport, rather than
+copying the full mocked service suite. Review of
+[pytest-docker/Compose](https://github.com/avast/pytest-docker),
+[Testcontainers-Python](https://testcontainers-python.readthedocs.io/en/latest/core/README.html)
+and [HomeAssistant-Test-Harness](https://github.com/HeadlessTarry/HomeAssistant-Test-Harness)
+found useful lifecycle/client helpers, but no demonstrated net simplification
+preserving this full contract.
+Most package, state, native-interface, containment and sanitization logic would
+remain custom. No new framework dependency or configurable ref input is added.
+Consolidate shared package-layout policy only when that policy next changes;
+installer trust-boundary validation must remain separate from producer validation.
+
+### Recorded hosted baseline (2026-11-06)
+
+The original byte-restoration scope passed in
+[run 42312152414](https://github.com/elmakus/hass-smarwi/actions/runs/42312152414)
+at harness commit `16ac338b1834d65449f47f18ad0d03a3d5a2ff49`: all three stages,
+matching checkpoint bytes, stable synthetic identity, containment and cleanup.
+HA `2026.11.0`, Python `3.14.10`, Mosquitto `2.0.22`, Paho `2.1.0`, aiohttp
+`3.14.5`, aiohasupervisor `0.8.1` and Docker `28.0.4` were actually observed.
+Main verified the artifact digest and installed hashes independently against Git
+blobs. That run published fresh telemetry before state assertions; it does **not**
+establish the later pre-publication retained-state assertion described above.
+The preceding run `42310285561` was blocked before application stages and cleaned
+up; it is not a pass. Neither result establishes native distribution or physical
+acceptance. Artifact retention is finite; retain sanitized receipts or reproduce
+only with renewed applicable runtime approval.
 
 ## Consistent formatting
 

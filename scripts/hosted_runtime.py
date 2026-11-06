@@ -81,7 +81,7 @@ def stop() -> None:
     require((CONFIG / "acceptance.exit").read_text() == "0")
 
 
-async def smoke(progress: dict) -> dict:
+async def smoke(progress: dict, stage: str) -> dict:
     """Use native onboarding, config flows, registry, reload, states and service APIs."""
     import aiohttp  # noqa: PLC0415
     import paho.mqtt.client as mqtt  # noqa: PLC0415
@@ -224,6 +224,7 @@ async def smoke(progress: dict) -> dict:
             subscribed = asyncio.Event()
             loop = asyncio.get_running_loop()
             commands = []
+            retained_status = []
 
             def on_connect(c, u, f, reason, p):
                 if reason == 0:
@@ -239,16 +240,24 @@ async def smoke(progress: dict) -> dict:
             client.on_subscribe = on_subscribe
 
             def received(c, u, message):
-                loop.call_soon_threadsafe(
-                    commands.append, message.payload.decode("utf-8")
-                )
+                if message.topic == TOPIC + "/cmd":
+                    loop.call_soon_threadsafe(
+                        commands.append, message.payload.decode("utf-8")
+                    )
+                elif message.topic == TOPIC + "/status" and message.retain:
+                    loop.call_soon_threadsafe(
+                        retained_status.append, message.payload.decode("utf-8")
+                    )
 
             client.on_message = received
             require(client.connect("127.0.0.1", 1883, 30) == 0)
             client.loop_start()
             try:
                 await asyncio.wait_for(connected.wait(), 10)
-                require(client.subscribe(TOPIC + "/cmd", qos=2)[0] == 0)
+                require(
+                    client.subscribe([(TOPIC + "/cmd", 2), (TOPIC + "/status", 1)])[0]
+                    == 0
+                )
                 await asyncio.wait_for(subscribed.wait(), 10)
 
                 async def publish(suffix, payload):
@@ -263,7 +272,14 @@ async def smoke(progress: dict) -> dict:
                     await publish("/status", STATUS.format(position))
 
                 progress["phase"] = "assertions"
-                await telemetry("c")
+                if stage == "restored-A":
+                    await until(
+                        lambda: asyncio.sleep(0, result=list(retained_status)),
+                        lambda value: bool(value)
+                        and all(payload == STATUS.format("c") for payload in value),
+                    )
+                else:
+                    await telemetry("c")
                 covers = await until(registry, lambda value: len(value) == 1)
                 cover = covers[0]
                 require(cover["unique_id"] == "offline_serial_cover")
@@ -313,8 +329,13 @@ async def smoke(progress: dict) -> dict:
                     "POST", f"/api/config/config_entries/entry/{entry_id}/reload"
                 )
                 require(result.get("require_restart") is False)
-                await telemetry("c")
-                await until(state, lambda value: valid(value, 0))
+                terminal = "open" if stage == "B" else "closed"
+                await telemetry("o" if stage == "B" else "c")
+                await until(
+                    state,
+                    lambda value: valid(value, None if stage == "B" else 0)
+                    and value["state"] == terminal,
+                )
                 covers = await registry()
                 require(
                     len(covers) == 1
@@ -341,6 +362,8 @@ async def smoke(progress: dict) -> dict:
                     "nonclosed_unknown": True,
                     "open_1_received": True,
                     "reload_identity": True,
+                    "terminal_position": terminal,
+                    "restored_retained_before_publish": stage == "restored-A",
                 }
             finally:
                 client.disconnect()
@@ -368,7 +391,9 @@ def main() -> None:
         elif command == "smoke":
             # Bound even third-party client thread joins; no native mutation is retried.
             signal.alarm(450)
-            sys.stdout.write(json.dumps(asyncio.run(smoke(progress))))
+            stage = sys.argv[2]
+            require(stage in {"A", "B", "restored-A"})
+            sys.stdout.write(json.dumps(asyncio.run(smoke(progress, stage))))
         else:
             raise RuntimeError("unknown command")
     except Exception:
