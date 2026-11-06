@@ -27,6 +27,9 @@ jobs:
       - name: Check code-style
         run: python3 -m ruff check .
 
+      - name: Check fork test and packaging code formatting
+        run: python3 -m ruff format --check scripts/build_release.py tests
+
   typechecker:
     name: Typechecker
     runs-on: ubuntu-latest

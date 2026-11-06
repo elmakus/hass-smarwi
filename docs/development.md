@@ -8,6 +8,20 @@ The source version is `0.4.0.dev0`, not a published or hardware-tested release. 
 
 The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. Standard cover controls, standard-action aliases, HTTP control/polling/fallback, dashboard dependencies, and additional actuator entities are outside scope.
 
+## Consistent formatting
+
+Use Ruff `0.14.3`, pinned in `requirements.txt`, for the fork-maintained packaging script and tests. Install that version in your tooling environment without replacing the HA test environment or installing the legacy HA 2024 requirements into it. Run these commands before committing:
+
+```sh
+ruff format scripts/build_release.py tests
+ruff format --check scripts/build_release.py tests
+ruff check .
+```
+
+The required **Linter** CI job runs both lint and the same format check. Formatting is therefore checked, not silently rewritten during CI. The committed files already use this format; editor reformatting with the project settings should leave no diff. `.editorconfig` explicitly keeps Python scripts space-indented while preserving the existing shell-script tab rule. Do not hide recurring formatter changes with stash or assume-unchanged flags: format and commit them with the relevant topic.
+
+The formatting check deliberately covers only `scripts/build_release.py` and `tests/`; it does not reformat inherited production integration files or change actuator behavior.
+
 ## Offline package checks
 
 Run these commands from the repository root. Python 3.13 and Git are sufficient; no third-party packages, HA instance, MQTT broker, or device are needed.
