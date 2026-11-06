@@ -7,14 +7,13 @@ from homeassistant.components.number import (
     NumberEntityDescription,
     NumberMode,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, SIGNAL_DISCOVERY_NEW
-from .device import SmarwiDeviceProp, FinetuneSetting, SmarwiDevice
+from .const import SIGNAL_DISCOVERY_NEW
+from .device import SmarwiConfigEntry, SmarwiDeviceProp, FinetuneSetting, SmarwiDevice
 from .entity import SmarwiEntity
 
 
@@ -61,19 +60,19 @@ SETTINGS_ENTITY_DESCRIPTIONS = [
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: SmarwiConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up SMARWI number entities based on a config entry."""
-    hass_data: dict[str, SmarwiDevice] = hass.data[DOMAIN][entry.entry_id]
+    devices = entry.runtime_data
 
     async def async_discover_device(entry_id: str, device_id: str) -> None:
         if entry_id != entry.entry_id:
             return  # not for us
-        assert hass_data[device_id] is not None
+        assert devices[device_id] is not None
 
         entities = [
-            SmarwiConfigNumber(hass_data[device_id], desc)
+            SmarwiConfigNumber(devices[device_id], desc)
             for desc in SETTINGS_ENTITY_DESCRIPTIONS
         ]
         async_add_entities(entities)
