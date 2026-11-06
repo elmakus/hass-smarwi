@@ -18,7 +18,7 @@ The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPE
 - Validate Remote ID as a literal MQTT segment without silent normalization. Native identity/in-progress checks and stored-data matching prevent duplicate new and legacy entries without modifying existing entries.
 - Route 1% to `open;1`, zero to `close`, and every explicit tilt request to the existing command path even at an inferred equal position. Install requested intent before awaited publication; a late acknowledgement must not restore intent cleared by an actual Stop invalidation.
 - On publication failure/cancellation, discard only the request that still owns the current local intent. Identity ownership distinguishes successive requests even at the same target. Do not restore an older target, retry automatically, change observed motion or interpret failure as proof of non-delivery. Existing Stop/terminal invalidation conditions remain unchanged.
-- Keep runtime device maps owned by typed config entries, with native unload/reload cleanup and tests for independent entries and bounded setup/unload failures.
+- Keep runtime device maps owned by typed config entries, with native unload/reload cleanup and tests for independent entries and bounded setup/unload failures. If MQTT client readiness returns false, use native setup retry before allocating runtime data or subscriptions.
 - Roll back failed/cancelled device subscription initialization without poisoning discovery. Preserve the provisional duplicate guard; run MQTT handlers only after all acquisitions succeed, and suppress handlers from abandoned attempts. Drain each returned native cleanup handle once.
 
 All public-interface tests use official HA fixtures and mocked Paho transport with explicit network guards. No HA server starts or live controller is installed. Passing them does not prove device execution, target accuracy, broker replay boundaries or safe physical Stop/holding. Retained telemetry remains last known.
@@ -27,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-06)
 
-The combined source checkpoint passes **211 tests and 57 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **214 tests and 57 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -41,7 +41,7 @@ git diff --check
 
 The ten package unittests, pinned strict checker (zero errors/warnings), Ruff, scoped formatting and installed-dependency check (122 compatible packages) pass. The offline tool command assumes its pinned tool is already cached; initial dependency/tool installation can need network access. Reuse existing environments and do not start `scripts/develop`.
 
-Main independently reran the combined checks for the tests-only pending-service characterization. Two fresh independent reviewers found no blockers; they inspected source and evidence but did not execute tests. Active primary-server diagnostics checked the changed Python test file with zero findings and no inconclusive outcome. The earlier 14-file all-server recheck was push-only/inconclusive, not a universal clean-LSP result. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result remains independently confirmed for its production-module scope, not test-file coverage.
+Main independently reran the combined checks for the MQTT-client setup-retry correction. Two fresh independent reviewers found no blockers; they inspected source and evidence but did not execute tests. Active primary-server diagnostics checked both changed Python files with zero findings and no inconclusive outcomes. The earlier 14-file all-server recheck was push-only/inconclusive, not a universal clean-LSP result. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result remains independently confirmed for its production-module scope, not test-file coverage.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
 
@@ -60,6 +60,14 @@ Six guarded public-HA cases hold a mocked tilt-command publish across successful
 Late completion stays with the old caller and object. The tests preserve replacement cache/device/entity ownership, telemetry, local intent and public state, with no late detached-entity write or extra publish. A changed synthetic status then produces exactly one effective active-cover update and state write. Rejected unload retains the active object and listeners. It is rejection before platform removal, not a partial-teardown test.
 
 No production defect was reproduced and no production policy changed. Cancellation is injected by mocked publication, not caused by native unload. These are characterization tests, not red-before-fix regressions. They do not prove delivery, retraction, physical stopping, holding, real broker replay or behavior on other HA versions.
+
+## MQTT-client setup retry (P4f)
+
+If the existing MQTT readiness helper returns false, setup now raises native `ConfigEntryNotReady` rather than returning a fatal setup failure. HA owns reporting, scheduled backoff and cancellation. The successful path and exceptions raised by the helper remain unchanged. This retries integration setup only, never device commands.
+
+Three guarded public lifecycle regressions cover native scheduled recovery without manual reload, cancellation on unload and cancellation on entry removal. Parent independently reproduced all three failures before the fix: recovery stayed in `SETUP_ERROR` with one readiness call after official frozen-time advancement. Failed readiness creates no runtime data, platforms, subscriptions, publications or registered entry entities. Another loaded entry remains functional.
+
+The tests inject documented helper false/true results, not a real timeout, ordinary startup race or broker outage. MQTT dependency setup normally runs first; an already loaded MQTT client passes the actual helper without requiring broker connectivity. Retry does not repair missing, disabled or fatally misconfigured MQTT. Other HA versions and physical/broker acceptance remain unverified.
 
 ## Consistent formatting
 
