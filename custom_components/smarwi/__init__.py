@@ -7,6 +7,7 @@ from asyncio import CancelledError
 from homeassistant.components import mqtt
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import CONF_REMOTE_ID, LOGGER
 from .device import SmarwiConfigEntry, SmarwiDevice
@@ -25,8 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SmarwiConfigEntry) -> bo
 
     # Make sure MQTT integration is enabled and the client is available.
     if not await mqtt.async_wait_for_mqtt_client(hass):
-        LOGGER.error("MQTT integration is not available")
-        return False
+        raise ConfigEntryNotReady("MQTT integration is not available")
 
     remote_id: str = entry.data[CONF_REMOTE_ID]
     entry.runtime_data = {}

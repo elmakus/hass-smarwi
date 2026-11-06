@@ -2,16 +2,19 @@
 
 import asyncio
 from collections.abc import Callable, Coroutine, Iterable
+from datetime import timedelta
 import logging
 import socket
 from unittest.mock import AsyncMock, Mock, call
 
+from freezegun.api import FrozenDateTimeFactory
 import probatio
 import pytest
 from pytest_homeassistant.common import (
     MockConfigEntry,
     MockMqttReasonCode,
     async_fire_mqtt_message,
+    async_fire_time_changed,
 )
 from pytest_homeassistant.typing import MqttMockHAClient, MqttMockPahoClient
 
@@ -201,6 +204,99 @@ async def test_runtime_data_is_entry_owned_before_platform_setup(
     assert getattr(entries[0], "runtime_data", None) is None
     assert entries[1].runtime_data is caches[1]
     assert set(entries[1].runtime_data) == {"runtime_serial_1"}
+
+
+@pytest.mark.parametrize("finish", ["recover", "unload", "remove"])
+async def test_mqtt_readiness_native_retry(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    entity_registry: er.EntityRegistry,
+    monkeypatch: pytest.MonkeyPatch,
+    freezer: FrozenDateTimeFactory,
+    finish: str,
+) -> None:
+    """Inject only documented client-readiness False, not a broker outage."""
+    await hass.async_start()
+    active_cache = smarwi_entry.runtime_data
+    active_device = active_cache[DEVICE_ID]
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={CONF_REMOTE_ID: "offline_retry_remote"}
+    )
+    entry.add_to_hass(hass)
+    readiness = AsyncMock(return_value=False)
+    forward = AsyncMock(wraps=hass.config_entries.async_forward_entry_setups)
+    subscribe = AsyncMock(wraps=mqtt.async_subscribe)
+    connection_subscribe = Mock(wraps=mqtt.async_subscribe_connection_status)
+    monkeypatch.setattr(mqtt, "async_wait_for_mqtt_client", readiness)
+    monkeypatch.setattr(hass.config_entries, "async_forward_entry_setups", forward)
+    monkeypatch.setattr(mqtt, "async_subscribe", subscribe)
+    monkeypatch.setattr(mqtt, "async_subscribe_connection_status", connection_subscribe)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    initial_state = entry.state
+    assert getattr(entry, "runtime_data", None) is None
+    forward.assert_not_called()
+    subscribe.assert_not_called()
+    connection_subscribe.assert_not_called()
+    mqtt_mock.async_publish.assert_not_called()
+    assert not er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    readiness.assert_awaited_once_with(hass)
+
+    if finish == "unload":
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    elif finish == "remove":
+        await hass.config_entries.async_remove(entry.entry_id)
+        assert hass.config_entries.async_get_entry(entry.entry_id) is None
+    readiness.return_value = True
+    # Native first retry is 5 seconds plus jitter; no manual reload/setup.
+    freezer.tick(timedelta(seconds=10))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    # Check both observations together so the red run proves no recovery either.
+    assert (initial_state, entry.state, readiness.await_count) == (
+        ConfigEntryState.SETUP_RETRY,
+        ConfigEntryState.LOADED if finish == "recover" else ConfigEntryState.NOT_LOADED,
+        2 if finish == "recover" else 1,
+    )
+    assert smarwi_entry.state is ConfigEntryState.LOADED
+    assert smarwi_entry.runtime_data is active_cache
+    assert active_cache[DEVICE_ID] is active_device
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "closed"
+    mqtt_mock.async_publish.assert_not_called()
+
+    if finish == "recover":
+        assert entry.runtime_data == {}
+        forward.assert_awaited_once()
+        connection_subscribe.assert_called_once()
+        subscribe.assert_awaited_once()
+        retry_topic = "ion/offline_retry_remote/%offline_retry_serial"
+        for suffix, payload in (("online", "1"), ("status", STATUS)):
+            async_fire_mqtt_message(hass, f"{retry_topic}/{suffix}", payload)
+            await hass.async_block_till_done()
+        assert set(entry.runtime_data) == {"offline_retry_serial"}
+        registered = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        assert {item.domain for item in registered} == {
+            "binary_sensor",
+            "cover",
+            "number",
+            "sensor",
+            "switch",
+        }
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    else:
+        forward.assert_not_called()
+        subscribe.assert_not_called()
+        connection_subscribe.assert_not_called()
+        assert getattr(entry, "runtime_data", None) is None
 
 
 async def test_runtime_data_reload_replaces_cache_without_duplicate_devices(
