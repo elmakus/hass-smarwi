@@ -23,7 +23,11 @@ class PackageTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.integration = self.root / "custom_components" / "smarwi"
-        shutil.copytree(SOURCE_ROOT / "custom_components" / "smarwi", self.integration)
+        shutil.copytree(
+            SOURCE_ROOT / "custom_components" / "smarwi",
+            self.integration,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
         shutil.copyfile(SOURCE_ROOT / "LICENSE", self.root / "LICENSE")
         shutil.copyfile(SOURCE_ROOT / "hacs.json", self.root / "hacs.json")
         subprocess.run(["git", "init", "--quiet", str(self.root)], check=True)
