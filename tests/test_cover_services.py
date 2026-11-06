@@ -28,9 +28,11 @@ from homeassistant.exceptions import ServiceNotSupported
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from custom_components.smarwi.const import CONF_REMOTE_ID, DOMAIN
+from custom_components.smarwi.cover import SmarwiCover
 from custom_components.smarwi.device import SmarwiDevice, SmarwiDeviceProp, StateCode
 from custom_components.smarwi.entity import SmarwiEntity
 
@@ -319,6 +321,129 @@ async def test_native_tilt_services_publish(
     mqtt_mock.async_publish.assert_called_once_with(
         f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None
     )
+
+
+@pytest.mark.parametrize(
+    ("service", "data", "target", "payload"),
+    [
+        ("open_cover_tilt", {}, 100, "open;100"),
+        ("close_cover_tilt", {}, 0, "close"),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 0}, 0, "close"),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 1}, 1, "open;1"),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 30}, 30, "open;30"),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 100}, 100, "open;100"),
+    ],
+)
+async def test_explicit_tilt_services_publish_at_equal_inferred_position(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    cover_id: str,
+    service: str,
+    data: dict[str, int],
+    target: int,
+    payload: str,
+) -> None:
+    """Never suppress explicit commands based only on a cached/inferred target."""
+    await hass.services.async_call(
+        "cover", service, {"entity_id": cover_id, **data}, blocking=True
+    )
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None
+    )
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", "s:210")
+    )
+    await hass.async_block_till_done()
+    idle_status = STATUS.replace("pos:o", "pos:c") if target == 0 else STATUS
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", idle_status)
+    await hass.async_block_till_done()
+    before = hass.states.get(cover_id)
+    assert before is not None
+    assert before.attributes[ATTR_CURRENT_TILT_POSITION] == target
+    mqtt_mock.async_publish.reset_mock()
+
+    for _ in range(2):
+        await hass.services.async_call(
+            "cover", service, {"entity_id": cover_id, **data}, blocking=True
+        )
+    assert (
+        mqtt_mock.async_publish.call_args_list
+        == [call(f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None)]
+        * 2
+    )
+    after = hass.states.get(cover_id)
+    assert after is not None
+    assert after.state == before.state
+    assert after.attributes == before.attributes
+
+
+@pytest.mark.parametrize(
+    ("service", "data", "payload"),
+    [
+        ("open_cover_tilt", {}, "open;100"),
+        ("close_cover_tilt", {}, "close"),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 30}, "open;30"),
+    ],
+)
+async def test_late_publish_completion_does_not_rearm_target_after_stop(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    cover_id: str,
+    service: str,
+    data: dict[str, int],
+    payload: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delayed QoS acknowledgement must not undo a subsequent native Stop."""
+    cover = next(
+        platform.entities[cover_id]
+        for platform in async_get_platforms(hass, DOMAIN)
+        if cover_id in platform.entities
+    )
+    assert isinstance(cover, SmarwiCover)
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", "s:210")
+    )
+    await hass.async_block_till_done()
+    assert cover.device.state_code.is_moving()
+    assert cover.is_opening
+    publish_started = asyncio.Event()
+    publish_completed = asyncio.Event()
+
+    async def gated_publish(*args: object, **kwargs: object) -> None:
+        """Delay only the first action's completion; both Stop publishes proceed."""
+        if not publish_started.is_set():
+            publish_started.set()
+            await publish_completed.wait()
+
+    publish = AsyncMock(side_effect=gated_publish)
+    monkeypatch.setattr(mqtt_mock, "async_publish", publish)
+    action = asyncio.create_task(
+        hass.services.async_call(
+            "cover", service, {"entity_id": cover_id, **data}, blocking=True
+        )
+    )
+    try:
+        await asyncio.wait_for(publish_started.wait(), timeout=5)
+        assert not action.done()
+        await hass.services.async_call(
+            "cover", "stop_cover_tilt", {"entity_id": cover_id}, blocking=True
+        )
+        assert not action.done()
+        assert publish.await_args_list == [
+            call(f"{BASE_TOPIC}/cmd", payload, 2, False, message_expiry_interval=None),
+            call(f"{BASE_TOPIC}/cmd", "stop", 2, False, message_expiry_interval=None),
+            call(f"{BASE_TOPIC}/cmd", "stop", 2, False, message_expiry_interval=None),
+        ]
+        assert cover._requested_position == -1
+        assert cover.current_cover_tilt_position is None
+    finally:
+        publish_completed.set()
+        await action
+
+    assert cover._requested_position == -1
+    assert cover.current_cover_tilt_position is None
+    assert publish.await_count == 3
 
 
 async def test_one_percent_is_an_open_target(
