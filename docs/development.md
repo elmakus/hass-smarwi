@@ -10,7 +10,7 @@ The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPE
 
 ## Consistent formatting
 
-Use Ruff `0.14.3`, pinned in `requirements.txt`, for the fork-maintained packaging script and tests. Install that version in your tooling environment without replacing the HA test environment or installing the legacy HA 2024 requirements into it. Run these commands before committing:
+Use Ruff `0.14.3`, pinned in `requirements.txt`, for the fork-maintained packaging script and tests. Both development requirement files now target HA `2026.11.0`; do not replace a working environment or install the historical HA 2024 pins/stubs from older revisions into it. Run these commands before committing:
 
 ```sh
 ruff format scripts/build_release.py tests
@@ -37,7 +37,9 @@ The builder does not edit the manifest or overwrite an existing ZIP. Use `--outp
 
 The **Package** workflow runs the same checks on pull requests to `main`, pushes to `main`, and manual dispatch. Its optional `tag` input must match the source manifest exactly. It saves a development ZIP as an Actions artifact; it has no release event or release-upload step and cannot publish a release. Do not install its untested artifact on a live window.
 
-Hassfest and HACS validation check metadata. The inherited Ruff/basedpyright workflow still uses HA 2024.8.0 on Python 3.12. Neither those checks nor Python 3.13 packaging tests establish runtime compatibility with current HA. Do not run `scripts/develop` as an offline check: it starts Home Assistant.
+Hassfest and HACS validation check metadata. The required Ruff/basedpyright workflow now uses Python `3.14.10` and HA `2026.11.0`, matching the runtime test baseline instead of historical HA 2024 stubs. It retains basedpyright `1.10.4` and `typeCheckingMode = "all"`; the checker receives the actual Python interpreter explicitly. Native HA Probatio replaces the previous form schema, obsolete `CONNECTION_CLASS` metadata and unnecessary ignores are removed, and one narrow `TextSelector` import exception documents generic-type erasure in HA's registry decorator. A lasting test protects native schema acceptance/rejection. No global rule is disabled.
+
+With the existing pinned environment, run `uv tool run --from basedpyright==1.10.4 basedpyright --pythonpath .venv/bin/python --project pyproject.toml` from the repository root. This alignment provides type evidence for the selected HA version, not a supported-version range or hardware acceptance. Package tests remain dependency-free. Do not run `scripts/develop` as an offline check: it starts Home Assistant.
 
 ## Direct tilt-contract baseline (P2a)
 

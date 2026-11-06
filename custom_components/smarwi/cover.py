@@ -12,7 +12,7 @@ from homeassistant.components.cover import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_connect  # pyright:ignore[reportUnknownVariableType]
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, LOGGER, NEAR_FRAME_POSITION, SIGNAL_DISCOVERY_NEW
@@ -26,7 +26,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the SMARWI window cover entities."""
-    hass_data: dict[str, SmarwiDevice] = hass.data[DOMAIN][entry.entry_id]  # pyright:ignore[reportAny]
+    hass_data: dict[str, SmarwiDevice] = hass.data[DOMAIN][entry.entry_id]
 
     async def async_discover_device(entry_id: str, device_id: str) -> None:
         if entry_id != entry.entry_id:
