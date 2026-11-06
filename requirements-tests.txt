@@ -1,3 +1,6 @@
-# Direct entity tests: pinned stable HA and its MQTT import dependency.
+# Match the official test fixtures to the pinned stable HA release.
 homeassistant==2026.11.0
+pytest-homeassistant==2026.11.0
 paho-mqtt==2.1.0
+# Imported by HA's MQTT config flow; matches HA 2026.11.0's hassio manifest.
+aiohasupervisor==0.8.1
