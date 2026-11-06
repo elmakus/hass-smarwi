@@ -1,31 +1,55 @@
-name: Release
+name: Package
 
 on:
-  release:
-    types:
-      - published
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact manifest version (empty uses the current version)
+        required: false
+        type: string
 
-permissions: {}
+permissions:
+  contents: read
 
 jobs:
-  release:
-    name: Release
+  package:
+    name: Package checks
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Adjust version number
-        run: |
-          yq -i -o json '.version="${{ github.event.release.tag_name }}"' \
-            custom_components/smarwi/manifest.json
-
-      - name: ZIP the integration directory
-        run: zip smarwi.zip -r ./
-        working-directory: custom_components/smarwi
-
-      - name: Upload the ZIP file to the release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          files: custom_components/smarwi/smarwi.zip
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Test packaging without Home Assistant or network access
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Build the integration ZIP without rewriting its manifest
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          VERSION=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = Path("custom_components/smarwi/manifest.json")
+          print(json.loads(manifest.read_text())["version"])
+          PY
+          )
+          python3 scripts/build_release.py --tag "${RELEASE_TAG:-$VERSION}"
+
+      - name: Save the development package for inspection only
+        # actions/upload-artifact v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: smarwi-development-package
+          path: dist/smarwi.zip
+          if-no-files-found: error

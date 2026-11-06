@@ -1,36 +1,50 @@
-# SMARWI Integration
-<img src="https://raw.githubusercontent.com/jirutka/hass-smarwi/master/custom_components/smarwi/brand/logo.png" width="250px" align="right">
+# SMARWI Integration — independently maintained fork
+<img src="https://raw.githubusercontent.com/elmakus/hass-smarwi/main/custom_components/smarwi/brand/logo.png" width="250px" align="right">
 
 [![GitHub Release][releases-shield]][releases]
 
 Home Assistant integration for Vektiva [SMARWI][smarwi-website] window opener (actuator).
 
-It uses a local MQTT broker, no “cloud” service is required.
+This independently maintained fork of [jirutka/hass-smarwi][upstream] uses only Home Assistant's MQTT connection. It has no cloud dependency, HTTP control, HTTP polling, or HTTP fallback. Device commissioning through the local web interface is separate from integration communication.
+
+The top-mounted actuator controls window tilt. Its single `WINDOW` cover exposes only `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. There are no standard cover-action aliases or standard position controls. Use native tilt actions in dashboards and automations.
+
+> [!WARNING]
+> Development only: no independently tested fork release exists yet. Runtime Python code is unchanged from upstream v0.3.5. No Home Assistant support range or firmware compatibility has been validated. Do not install this baseline on a live window.
+>
+> Position percentages are inferred, not measured feedback. The inherited 1% target boundary, cached-state behavior, stop/holding policy, and settings writes remain unverified or defective. Do not treat network Stop as an emergency-stop guarantee or enable writable calibrated distance. Keep the physical safety controls available.
+
+See [development and release gates](docs/development.md) and the [upstream ledger](docs/upstream.md).
 
 
 ## Installation
 
+The following instructions describe future tested fork releases, not an available release. This fork retains domain `smarwi`; it cannot run alongside another integration using the same domain. Existing installations and migration are outside this fresh-install project.
+
 ### Using Home Assistant Community Store (HACS)
 
 1. Ensure that [HACS] is installed.
-1. Go to **HACS > Integrations**.
-1. Search for and select **SMARWI**.
-1. Click on the **Download** button in the bottom right corner.
+1. Add `https://github.com/elmakus/hass-smarwi` as a custom repository with category **Integration**. This fork is not in the default catalog.
+1. Select **SMARWI (elmakus fork)** and a published, tested fork release.
+1. Download the integration.
 1. Restart Home Assistant.
 
 **TIP:** You can skip steps 2–3 by opening:
 
-[![Add jirutka/hass-smarwi repository to your Home Assistant instance][my-hacs-repo-img]][my-hacs-repo]
+[![Add elmakus/hass-smarwi repository to your Home Assistant instance][my-hacs-repo-img]][my-hacs-repo]
 
 
 ### Manually
 
 1. Download `smarwi.zip` from the [latest release][latest-release].
-1. Unpack `smarwi.zip` and copy the `custom_components/smarwi` directory into the `custom_components` directory of your Home Assistant installation.
+1. Create `custom_components/smarwi` inside the Home Assistant configuration directory.
+1. Extract the ZIP contents directly into that directory. `manifest.json` and `__init__.py` must be immediately inside `custom_components/smarwi`, without an extra enclosing folder.
 1. Restart Home Assistant.
 
 
 ## Configuration
+
+These are commissioning instructions, not part of an offline development test. Changing the device's configured broker can disable vektiva.online service. No simultaneous vendor/local broker operation is promised. Device plans can still act independently; Wi-Fi-off periods prevent remote control.
 
 ### 1. Set up MQTT broker
 
@@ -85,11 +99,11 @@ The integration will create the following entities for each discovered SMARWI de
 
 | Name                | Platform      | Category   | Description
 | ------------------- | ------------- | ---------- | --------------------------------------------------------------------------|
-| cover               | cover         |            | Control the window tilt position (open, close, stop, set position). |
+| cover               | cover         |            | WINDOW cover with tilt-only actions: open tilt, close tilt, stop tilt, and set tilt position. Percentages are inferred, not measured. |
 | ridge_fix           | switch        |            | Fix or release the ridge. |
 | ridge_inside        | binary_sensor | diagnostic | Shows if the ridge is inside the device (i.e. it’s operational). |
 | rssi                | sensor        | diagnostic | Monitor WiFi signal strength (disabled by default). |
-| calibrated_distance | number        | config     | Set calibrated distance (finetune setting, disabled by default). |
+| calibrated_distance | number        | config     | Inherited writable calibration value, disabled by default. Do not enable: write semantics are unverified and the manufacturer's UI treats it as read-only. |
 | closed_hold_power   | number        | config     | Set closed holding power (finetune setting). |
 | closed_position     | number        | config     | Set window closed position finetune (finetune setting). |
 | frame_power         | number        | config     | Set near frame power (finetune setting). |
@@ -103,11 +117,18 @@ The integration will create the following entities for each discovered SMARWI de
 
 ## Screenshots
 
-<img src="https://raw.githubusercontent.com/jirutka/hass-smarwi/master/images/screenshot-device.png" width="500px" align="left" alt="Screenshot of the device dashboard">
+<img src="https://raw.githubusercontent.com/elmakus/hass-smarwi/main/images/screenshot-device.png" width="500px" align="left" alt="Screenshot of the device dashboard">
 
-<img src="https://raw.githubusercontent.com/jirutka/hass-smarwi/master/images/screenshot-cover-position.png" width="300px" alt="Screenshot of the cover control in position mode">
+<img src="https://raw.githubusercontent.com/elmakus/hass-smarwi/main/images/screenshot-cover-position.png" width="300px" alt="Screenshot of the cover control in position mode">
 
-<img src="https://raw.githubusercontent.com/jirutka/hass-smarwi/master/images/screenshot-cover-buttons.png" width="300px" alt="Screenshot of the cover control in button mode">
+<img src="https://raw.githubusercontent.com/elmakus/hass-smarwi/main/images/screenshot-cover-buttons.png" width="300px" alt="Screenshot of the cover control in button mode">
+
+
+## Removal
+
+For an authorized test installation, remove the SMARWI configuration entry under **Settings > Devices & Services**, then remove this repository through HACS. For a manual installation, remove only `custom_components/smarwi`. Restart Home Assistant after removing the integration files.
+
+Removing this integration does not change device plans, broker settings, calibration, or physical window position. Do not change shared MQTT settings or send movement/Stop commands as cleanup.
 
 
 ## Resources
@@ -119,12 +140,13 @@ The integration will create the following entities for each discovered SMARWI de
 
 ## License
 
-This project is licensed under the [MIT License].
+This project is licensed under the [MIT License](LICENSE). Original copyright and attribution notices remain intact. Jakub Jirutka and Joakim Sørensen are credited in `LICENSE`; elmakus independently maintains this fork. Product names and images identify their respective owners and do not imply endorsement.
 
 
-[releases]: https://github.com/jirutka/hass-smarwi/releases
-[latest-release]: https://github.com/jirutka/hass-smarwi/releases/latest
-[releases-shield]: https://img.shields.io/github/release/jirutka/hass-smarwi.svg?style=flat-square
+[upstream]: https://github.com/jirutka/hass-smarwi
+[releases]: https://github.com/elmakus/hass-smarwi/releases
+[latest-release]: https://github.com/elmakus/hass-smarwi/releases/latest
+[releases-shield]: https://img.shields.io/github/release/elmakus/hass-smarwi.svg?style=flat-square
 [HACS]: https://hacs.xyz/
 [smarwi-website]: https://vektiva.com/index.php/en/
 [smarwi-manual]: https://vektiva.com/downloads/SMARWI_manual_EN.pdf
@@ -133,8 +155,7 @@ This project is licensed under the [MIT License].
 [my-hass-config-start-img]: https://my.home-assistant.io/badges/config_flow_start.svg
 [my-hass-mosquitto]: https://my.home-assistant.io/redirect/supervisor_addon/?addon=core_mosquitto
 [my-hass-users]: https://my.home-assistant.io/redirect/users/
-[my-hacs-repo]: https://my.home-assistant.io/redirect/hacs_repository/?owner=jirutka&repository=hass-smarwi&category=Integration
+[my-hacs-repo]: https://my.home-assistant.io/redirect/hacs_repository/?owner=elmakus&repository=hass-smarwi&category=Integration
 [my-hacs-repo-img]: https://my.home-assistant.io/badges/hacs_repository.svg
 [mosquitto-addon]: https://github.com/home-assistant/addons/blob/master/mosquitto/DOCS.md
 [mqtt-integration]: https://www.home-assistant.io/integrations/mqtt/
-[MIT License]: https://opensource.org/license/MIT
