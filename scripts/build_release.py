@@ -19,7 +19,7 @@ def build_release(output: Path, tag: str) -> Path:
     except (OSError, ValueError) as err:
         raise ValueError(f"Cannot read release metadata: {err}") from err
     if not isinstance(manifest, dict) or not isinstance(hacs, dict):
-        raise ValueError("manifest.json and hacs.json must contain JSON objects")
+        raise TypeError("manifest.json and hacs.json must contain JSON objects")
     if manifest.get("domain") != "smarwi":
         raise ValueError("The integration domain must remain smarwi")
     if not tag or manifest.get("version") != tag:
@@ -69,7 +69,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         build_release(args.output, args.tag)
-    except (OSError, ValueError, subprocess.CalledProcessError) as err:
+    except (OSError, TypeError, ValueError, subprocess.CalledProcessError) as err:
         parser.error(str(err))
 
 

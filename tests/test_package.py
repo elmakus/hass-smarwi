@@ -89,7 +89,7 @@ class PackageTests(unittest.TestCase):
         for data in ("{", "[]", "{}", json.dumps({**self.manifest, "domain": "renamed"})):
             with self.subTest(data=data):
                 self.manifest_path.write_text(data, encoding="utf-8")
-                with self.assertRaises(ValueError):
+                with self.assertRaises(TypeError if data == "[]" else ValueError):
                     build_release.build_release(self.output, self.tag)
         self.assertFalse(self.output.exists())
 
