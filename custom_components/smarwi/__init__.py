@@ -5,7 +5,7 @@
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 from .const import CONF_REMOTE_ID, DOMAIN, LOGGER
 from .device import SmarwiDevice
@@ -32,6 +32,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass_data: dict[str, SmarwiDevice] = hass.data.setdefault(  # pyright:ignore[reportAny]
         DOMAIN, {}
     ).setdefault(entry_id, {})
+
+    @callback
+    def connection_status_changed(connected: bool) -> None:
+        if not connected:
+            for device in hass_data.values():
+                device.async_broker_disconnected()
+
+    entry.async_on_unload(
+        mqtt.async_subscribe_connection_status(hass, connection_status_changed)
+    )
 
     async def device_discovery(msg: mqtt.ReceiveMessage) -> None:
         # Topic looks like ion/<remote_id>/%<device_id>/status.

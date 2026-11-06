@@ -7,9 +7,14 @@ from unittest.mock import AsyncMock, Mock, call
 
 import probatio
 import pytest
-from pytest_homeassistant.common import MockConfigEntry, async_fire_mqtt_message
+from pytest_homeassistant.common import (
+    MockConfigEntry,
+    MockMqttReasonCode,
+    async_fire_mqtt_message,
+)
 from pytest_homeassistant.typing import MqttMockHAClient, MqttMockPahoClient
 
+from homeassistant.components import mqtt
 from homeassistant.components.cover import (
     ATTR_CURRENT_POSITION,
     ATTR_CURRENT_TILT_POSITION,
@@ -62,6 +67,34 @@ def mqtt_client_mock(mqtt_client_mock: MqttMockPahoClient) -> MqttMockPahoClient
 
     mqtt_client_mock.disconnect.side_effect = disconnect
     return mqtt_client_mock
+
+
+@pytest.fixture
+def broker_connection(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    mqtt_client_mock: MqttMockPahoClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Mock:
+    """Drive official Paho callbacks and expose the real HA connection flag."""
+    real_client = mqtt_mock._mock_wraps
+    # Upstream assigns a shadow connected=True on its wrapping MagicMock.
+    monkeypatch.setattr(
+        type(mqtt_mock),
+        "connected",
+        property(lambda _: real_client.connected),
+        raising=False,
+    )
+
+    def transition(connected: bool) -> None:
+        handler = (
+            mqtt_client_mock.on_connect if connected else mqtt_client_mock.on_disconnect
+        )
+        handler(mqtt_client_mock, None, 0, MockMqttReasonCode())
+        assert real_client.connected is connected
+        assert mqtt.is_connected(hass) is connected
+
+    return Mock(side_effect=transition)
 
 
 @pytest.fixture
@@ -818,3 +851,209 @@ async def test_unload_removes_the_cover(
     assert hass.states.get(cover_id) == state
     mqtt_mock.async_subscribe.assert_not_called()
     mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.parametrize("reconnect", [False, True])
+async def test_broker_session_does_not_reuse_online(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    broker_connection: Mock,
+    reconnect: bool,
+) -> None:
+    """Disconnect and reconnect-only must not leave cached entities available."""
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "open"
+    broker_connection(False)
+    await hass.async_block_till_done()
+    if reconnect:
+        broker_connection(True)
+        await hass.async_block_till_done()
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "unavailable"
+    mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.parametrize("online_first", [False, True])
+async def test_broker_availability_requires_accepted_status(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    online_first: bool,
+) -> None:
+    """Neither online nor malformed status substitutes for accepted telemetry."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: REMOTE_ID})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+    await hass.async_block_till_done()
+    device = hass.data[DOMAIN][entry.entry_id][DEVICE_ID]
+    if online_first:
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+        await hass.async_block_till_done()
+    for payload in ("broken", "s:bad", "future:1", ""):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+        await hass.async_block_till_done()
+        assert not device.available
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    assert device.available is online_first
+    if not online_first:
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+        await hass.async_block_till_done()
+    assert device.available
+
+
+@pytest.mark.parametrize("retained_online", [False, True])
+async def test_broker_session_recovery_preserves_last_known_cache(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    broker_connection: Mock,
+    dispatcher_spy: Mock,
+    retained_online: bool,
+) -> None:
+    """New-session online, including retained replay, is observation not freshness."""
+    second_id = "offline_second_serial"
+    second_topic = f"ion/{REMOTE_ID}/%{second_id}"
+    for topic, payload in (
+        (f"{second_topic}/online", "1"),
+        (f"{second_topic}/status", STATUS.replace("Offline fixture", "Second fixture")),
+        (f"{second_topic}/online", "1"),
+        (f"{BASE_TOPIC}/config/advanced", "vpct:75\nospd:30"),
+        (f"{second_topic}/config/advanced", "vpct:75\nospd:30"),
+    ):
+        async_fire_mqtt_message(hass, topic, payload)
+        await hass.async_block_till_done()
+    devices = hass.data[DOMAIN][smarwi_entry.entry_id]
+    snapshots = {
+        key: (device._status.copy(), device.finetune_settings._data.copy())
+        for key, device in devices.items()
+    }
+    entity_ids = []
+    for device_id in (DEVICE_ID, second_id):
+        for platform, key in (
+            ("cover", "cover"),
+            ("binary_sensor", "ridge_inside"),
+            ("switch", "ridge_fix"),
+            ("number", "max_open_position"),
+        ):
+            entity_id = entity_registry.async_get_entity_id(
+                platform, DOMAIN, f"{device_id}_{key}"
+            )
+            assert entity_id is not None
+            state = hass.states.get(entity_id)
+            assert state is not None
+            assert state.state != "unavailable"
+            entity_ids.append(entity_id)
+
+    mqtt_mock.async_publish.reset_mock()
+    dispatcher_spy.reset_mock()
+    broker_connection(False)
+    await hass.async_block_till_done()
+    for device in devices.values():
+        dispatcher_spy.assert_any_call(
+            hass, device.signal_update, {SmarwiDeviceProp.AVAILABLE}
+        )
+        assert not device.available
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "unavailable"
+    for topic in (BASE_TOPIC, second_topic):
+        # HA's message injector can simulate a queued online arriving after loss.
+        async_fire_mqtt_message(hass, f"{topic}/online", "1")
+        await hass.async_block_till_done()
+    mqtt_mock.async_publish.assert_not_called()
+    for _ in range(2):
+        broker_connection(True)
+        await hass.async_block_till_done()
+        for entity_id in entity_ids:
+            state = hass.states.get(entity_id)
+            assert state is not None
+            assert state.state == "unavailable"
+    mqtt_mock.async_publish.assert_not_called()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "unavailable"
+    for topic in (BASE_TOPIC, second_topic):
+        async_fire_mqtt_message(hass, f"{topic}/online", "0")
+        await hass.async_block_till_done()
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "unavailable"
+    # Existing online handling requests lcfa even for online=0; not new traffic.
+    assert mqtt_mock.async_publish.call_count == 2
+    mqtt_mock.async_publish.reset_mock()
+    for topic in (BASE_TOPIC, second_topic):
+        async_fire_mqtt_message(hass, f"{topic}/online", "1", retain=retained_online)
+        await hass.async_block_till_done()
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state != "unavailable"
+    assert mqtt_mock.async_publish.call_args_list == [
+        call(f"{BASE_TOPIC}/cmd", "lcfa", 2, False, message_expiry_interval=None),
+        call(f"{second_topic}/cmd", "lcfa", 2, False, message_expiry_interval=None),
+    ]
+    for key, device in devices.items():
+        assert (device._status, device.finetune_settings._data) == snapshots[key]
+        assert device.closed is False
+        assert device.state_code is StateCode.IDLE
+
+    assert await hass.config_entries.async_unload(smarwi_entry.entry_id)
+    await hass.async_block_till_done()
+    unloaded_states = {
+        entity_id: hass.states.get(entity_id) for entity_id in entity_ids
+    }
+    dispatcher_spy.reset_mock()
+    mqtt_mock.async_publish.reset_mock()
+    mqtt_mock.async_subscribe.reset_mock()
+    broker_connection(False)
+    await hass.async_block_till_done()
+    broker_connection(True)
+    await hass.async_block_till_done()
+    for topic in (BASE_TOPIC, second_topic):
+        async_fire_mqtt_message(hass, f"{topic}/online", "1")
+        async_fire_mqtt_message(hass, f"{topic}/status", STATUS)
+    await hass.async_block_till_done()
+    dispatcher_spy.assert_not_called()
+    mqtt_mock.async_publish.assert_not_called()
+    mqtt_mock.async_subscribe.assert_not_called()
+    assert smarwi_entry.entry_id not in hass.data[DOMAIN]
+    assert {
+        entity_id: hass.states.get(entity_id) for entity_id in entity_ids
+    } == unloaded_states
+
+
+async def test_broker_disconnected_discovery_cannot_arm_online(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    broker_connection: Mock,
+) -> None:
+    """Devices created while disconnected also require a connected online message."""
+    broker_connection(False)
+    await hass.async_block_till_done()
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: REMOTE_ID})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    for suffix, payload in (("online", "1"), ("online", "1"), ("status", STATUS)):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{suffix}", payload)
+        await hass.async_block_till_done()
+    device = hass.data[DOMAIN][entry.entry_id][DEVICE_ID]
+    assert not device.available
+    mqtt_mock.async_publish.assert_not_called()
+    broker_connection(True)
+    await hass.async_block_till_done()
+    assert not device.available
+    mqtt_mock.async_publish.assert_not_called()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+    await hass.async_block_till_done()
+    assert device.available
