@@ -19,6 +19,7 @@ The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPE
 - Route 1% to `open;1`, zero to `close`, and every explicit tilt request to the existing command path even at an inferred equal position. Install requested intent before awaited publication; a late acknowledgement must not restore intent cleared by an actual Stop invalidation.
 - On publication failure/cancellation, discard only the request that still owns the current local intent. Identity ownership distinguishes successive requests even at the same target. Do not restore an older target, retry automatically, change observed motion or interpret failure as proof of non-delivery. Existing Stop/terminal invalidation conditions remain unchanged.
 - Keep runtime device maps owned by typed config entries, with native unload/reload cleanup and tests for independent entries and bounded setup/unload failures.
+- Roll back failed/cancelled device subscription initialization without poisoning discovery. Preserve the provisional duplicate guard; run MQTT handlers only after all acquisitions succeed, and suppress handlers from abandoned attempts. Drain each returned native cleanup handle once.
 
 All public-interface tests use official HA fixtures and mocked Paho transport with explicit network guards. No HA server starts or live controller is installed. Passing them does not prove device execution, target accuracy, broker replay boundaries or safe physical Stop/holding. Retained telemetry remains last known.
 
@@ -26,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-06)
 
-The combined source checkpoint passes **188 tests and 57 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **205 tests and 57 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -40,9 +41,17 @@ git diff --check
 
 The ten package unittests, pinned strict checker (zero errors/warnings), Ruff, scoped formatting and installed-dependency check (122 compatible packages) pass. The offline tool command assumes its pinned tool is already cached; initial dependency/tool installation can need network access. Reuse existing environments and do not start `scripts/develop`.
 
-Main independently reran the combined checks after integrating reviewed isolated topics. Independent reviewers inspected source and evidence; they did not independently run those checks. Active diagnostics caught real test-assertion issues, which were fixed without disabling rules. Earlier isolated-worktree import findings came from a wrong interpreter; later probes recovered. The final 14-file all-server recheck was push-only/inconclusive, not a universal clean-LSP result. The explicit-interpreter strict CLI result remains independently confirmed.
+Main independently reran the combined checks for the reviewed initialization-recovery patch. Two fresh independent reviewers found no blockers; they inspected source and evidence but did not execute tests. Active primary-server diagnostics checked the three changed Python files with zero findings and no inconclusive outcomes. The earlier 14-file all-server recheck was push-only/inconclusive, not a universal clean-LSP result. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result remains independently confirmed.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
+
+## Discovery initialization recovery (P4d)
+
+A failed per-device subscription acquisition previously left its provisional device in the entry cache, preventing rediscovery. Earlier acquired listeners remained effective until entry unload and could announce entities for that incomplete device. Initialization now rolls back returned handles on exception/cancellation and removes only its owned reservation. A local `asyncio.Event` gates the original HA MQTT jobs until acquisition succeeds; failure/unload wakes them to exit. A handle returned after teardown is removed immediately and initialization propagates cancellation. No custom replay scheduler or command queue is added.
+
+Main independently reproduced ten initial red cases against unchanged production source. Seventeen final public HA/MQTT cases cover all three acquisition boundaries, error/cancellation, direct unload or retry, duplicate discovery, retained-marked status, successful/rejected unload, late-returned handles and another active entry. The seven additional cases were not separately claimed as red before production. The exact cover identity and four tilt features remain asserted.
+
+Native HA 2026.11 public subscribe currently registers without yielding. Deliberately suspended acquisitions characterize defensive robustness, not demonstrated broker timing. The gate does not cancel original handlers already executing after commit or solve every queued discovery/unload race. Native registration failures before returning a handle and removal-callback failures remain unproven. Failed attempts keep an inert drained unload closure until entry teardown. These are software ownership guarantees, not firmware, freshness or physical-safety evidence.
 
 ## Consistent formatting
 
