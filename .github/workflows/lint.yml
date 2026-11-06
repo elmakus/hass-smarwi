@@ -47,4 +47,6 @@ jobs:
         run: python3 -m pip install -r requirements.txt
 
       - name: Check types
-        run: basedpyright --pythonpath "$(which python3)" --project pyproject.toml
+        run: >-
+          basedpyright --pythonpath "$(which python3)"
+          --project pyproject.toml
