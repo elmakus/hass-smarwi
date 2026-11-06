@@ -185,6 +185,42 @@ class HostedAcceptanceTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(hosted.Blocked):
                 hosted.network_observation(bad)
 
+    def test_probe_output_matches_parser(self) -> None:
+        """Exercise shipped shell framing with synthetic commands, without networking."""
+        probe = hosted.NETWORK_PROBE
+        for command, replacement in {
+            "readlink /proc/self/ns/net": "echo 'net:[123]'",
+            "ls -1 /sys/class/net": "echo lo",
+            "cat /proc/net/route": "echo 'Iface Destination Gateway Flags'",
+            "cat /proc/net/ipv6_route": ":",
+        }.items():
+            self.assertEqual(probe.count(command), 1)
+            probe = probe.replace(command, replacement)
+        output = subprocess.run(
+            ["/bin/sh", "-c", probe], check=True, capture_output=True, text=True
+        ).stdout.strip()
+        self.assertEqual(hosted.network_observation(output), "net:[123]")
+
+    def test_failure_location_never_exports_exception_values(self) -> None:
+        """Keep private exception text and paths out of the public failure record."""
+        private = "Bearer synthetic-private-value"
+        try:
+            hosted.network_observation(
+                private + "\nINTERFACES\nlo\nIPV4\nIface Destination\nIPV6\n"
+            )
+        except hosted.Blocked as error:
+            safe = hosted.failure_location(error)
+        else:
+            self.fail("Synthetic invalid namespace was accepted")
+        self.assertEqual(set(safe), {"source", "function", "line"})
+        self.assertEqual(safe["source"], "scripts/hosted_acceptance.py")
+        self.assertEqual(safe["function"], "network_observation")
+        self.assertIsInstance(safe["line"], int)
+        self.assertNotIn(private, json.dumps(safe))
+        self.assertEqual(
+            hosted.failure_location(RuntimeError(private)), {"source": "external"}
+        )
+
     def fixture_inspect(self):
         """Return the minimum exact expected private Docker inspect shape."""
         image = {"Id": "sha256:" + "a" * 64, "Config": {"Env": ["PATH=/usr/bin:/bin"]}}
@@ -239,6 +275,27 @@ class HostedAcceptanceTests(unittest.TestCase):
             ],
         }
         return info, image, mounts
+
+    def test_verified_image_metadata_requires_exact_environment(self) -> None:
+        """Accept reviewed stock metadata, not overrides or unknown environment keys."""
+        info, image, mounts = self.fixture_inspect()
+        metadata = [
+            "PIP_EXTRA_INDEX_URL=https://wheels.example.invalid/simple",
+            "DOWNLOAD_SHA256=" + "a" * 64,
+            "GPG_KEYS=SYNTHETIC_PUBLIC_KEY_ID",
+            "VERSION=2.0.22",
+        ]
+        image["Config"]["Env"] += metadata
+        info["Config"]["Env"] += metadata
+        hosted.validate_container(info, image, "none", mounts, "1001:1001")
+        bad = deepcopy(info)
+        bad["Config"]["Env"][-1] = "VERSION=overridden"
+        with self.assertRaises(hosted.Blocked):
+            hosted.validate_container(bad, image, "none", mounts, "1001:1001")
+        image["Config"]["Env"].append("UNREVIEWED_BUILD_SETTING=synthetic")
+        info["Config"]["Env"].append("UNREVIEWED_BUILD_SETTING=synthetic")
+        with self.assertRaises(hosted.Blocked):
+            hosted.validate_container(info, image, "none", mounts, "1001:1001")
 
     def test_container_guards_reject_dangerous_docker_settings(self) -> None:
         """No ports, privileges, capabilities, host namespaces, sockets or tokens."""
