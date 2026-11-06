@@ -27,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-06)
 
-The combined source checkpoint passes **205 tests and 57 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **211 tests and 57 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -41,7 +41,7 @@ git diff --check
 
 The ten package unittests, pinned strict checker (zero errors/warnings), Ruff, scoped formatting and installed-dependency check (122 compatible packages) pass. The offline tool command assumes its pinned tool is already cached; initial dependency/tool installation can need network access. Reuse existing environments and do not start `scripts/develop`.
 
-Main independently reran the combined checks for the reviewed initialization-recovery patch. Two fresh independent reviewers found no blockers; they inspected source and evidence but did not execute tests. Active primary-server diagnostics checked the three changed Python files with zero findings and no inconclusive outcomes. The earlier 14-file all-server recheck was push-only/inconclusive, not a universal clean-LSP result. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result remains independently confirmed.
+Main independently reran the combined checks for the tests-only pending-service characterization. Two fresh independent reviewers found no blockers; they inspected source and evidence but did not execute tests. Active primary-server diagnostics checked the changed Python test file with zero findings and no inconclusive outcome. The earlier 14-file all-server recheck was push-only/inconclusive, not a universal clean-LSP result. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result remains independently confirmed for its production-module scope, not test-file coverage.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
 
@@ -52,6 +52,14 @@ A failed per-device subscription acquisition previously left its provisional dev
 Main independently reproduced ten initial red cases against unchanged production source. Seventeen final public HA/MQTT cases cover all three acquisition boundaries, error/cancellation, direct unload or retry, duplicate discovery, retained-marked status, successful/rejected unload, late-returned handles and another active entry. The seven additional cases were not separately claimed as red before production. The exact cover identity and four tilt features remain asserted.
 
 Native HA 2026.11 public subscribe currently registers without yielding. Deliberately suspended acquisitions characterize defensive robustness, not demonstrated broker timing. The gate does not cancel original handlers already executing after commit or solve every queued discovery/unload race. Native registration failures before returning a handle and removal-callback failures remain unproven. Failed attempts keep an inert drained unload closure until entry teardown. These are software ownership guarantees, not firmware, freshness or physical-safety evidence.
+
+## Pending native tilt-service lifecycle (P4e)
+
+Six guarded public-HA cases hold a mocked tilt-command publish across successful native unload/reload or immediate rejected unload. Each lifecycle path resolves success, failure and publish-originated cancellation separately, paired with native open, close and set-tilt actions respectively. Adjacent tests cover shared request failure/cancellation across all three actions; this slice is not a full cross-product. In pinned HA 2026.11.0, the caller-created service task remains pending through unload.
+
+Late completion stays with the old caller and object. The tests preserve replacement cache/device/entity ownership, telemetry, local intent and public state, with no late detached-entity write or extra publish. A changed synthetic status then produces exactly one effective active-cover update and state write. Rejected unload retains the active object and listeners. It is rejection before platform removal, not a partial-teardown test.
+
+No production defect was reproduced and no production policy changed. Cancellation is injected by mocked publication, not caused by native unload. These are characterization tests, not red-before-fix regressions. They do not prove delivery, retraction, physical stopping, holding, real broker replay or behavior on other HA versions.
 
 ## Consistent formatting
 

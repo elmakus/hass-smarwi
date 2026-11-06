@@ -10,9 +10,9 @@ This independently maintained fork of [jirutka/hass-smarwi][upstream] uses only 
 The top-mounted actuator controls window tilt. Its single `WINDOW` cover exposes only `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. There are no standard cover-action aliases or standard position controls. Use native tilt actions in dashboards and automations.
 
 > [!WARNING]
-> Development only: no independently tested fork release exists yet. Runtime Python code is unchanged from upstream v0.3.5. No Home Assistant support range or firmware compatibility has been validated. Do not install this baseline on a live window.
+> Development only: no independently tested fork release exists yet. This fork includes software fixes recorded in the upstream ledger. No Home Assistant support range or firmware compatibility has been validated. Do not install this baseline on a live window.
 >
-> Position percentages are inferred, not measured feedback. The inherited 1% target boundary, cached-state behavior, stop/holding policy, and settings writes remain unverified or defective. Do not treat network Stop as an emergency-stop guarantee or enable writable calibrated distance. Keep the physical safety controls available.
+> Public tilt percentage is zero only for accepted closed telemetry, including cache; otherwise it is unknown. Requested targets and private motion/direction estimates are not measured feedback. Stop/holding, real broker replay, freshness and settings safety remain unverified. Do not treat network Stop as an emergency-stop guarantee or enable writable calibrated distance. Keep the physical safety controls available.
 
 See [development and release gates](docs/development.md) and the [upstream ledger](docs/upstream.md).
 
@@ -99,7 +99,7 @@ The integration will create the following entities for each discovered SMARWI de
 
 | Name                | Platform      | Category   | Description
 | ------------------- | ------------- | ---------- | --------------------------------------------------------------------------|
-| cover               | cover         |            | WINDOW cover with tilt-only actions: open tilt, close tilt, stop tilt, and set tilt position. Percentages are inferred, not measured. |
+| cover               | cover         |            | WINDOW cover with tilt-only actions: open tilt, close tilt, stop tilt, and set tilt position. Accepted closed telemetry reports 0%; other positions are unknown. |
 | ridge_fix           | switch        |            | Fix or release the ridge. |
 | ridge_inside        | binary_sensor | diagnostic | Shows if the ridge is inside the device (i.e. it’s operational). |
 | rssi                | sensor        | diagnostic | Monitor WiFi signal strength (disabled by default). |
