@@ -85,6 +85,8 @@ not settle complete-versus-partial snapshots or stricter numeric domains.
 
 ## Availability, settings and safety limits
 
+Before runtime setup, a false MQTT-client readiness result requests native HA setup retry. This does not require a connected broker, retry device commands or repair missing/disabled/fatally misconfigured MQTT. Tests inject that documented result; no actual client timeout or broker outage is established.
+
 Retained online/status are last-known data. The availability gate requires
 HA broker connectivity, a session online observation and accepted status; disconnect
 clears the online observation, not cached telemetry. Reconnect alone cannot restore
