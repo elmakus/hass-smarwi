@@ -13,7 +13,7 @@ The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPE
 Run these commands from the repository root. Python 3.13 and Git are sufficient; no third-party packages, HA instance, MQTT broker, or device are needed.
 
 ```sh
-python3 -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -p test_package.py -v
 python3 scripts/build_release.py --tag 0.4.0.dev0
 ```
 
@@ -24,6 +24,23 @@ The builder does not edit the manifest or overwrite an existing ZIP. Use `--outp
 The **Package** workflow runs the same checks on pull requests to `main`, pushes to `main`, and manual dispatch. Its optional `tag` input must match the source manifest exactly. It saves a development ZIP as an Actions artifact; it has no release event or release-upload step and cannot publish a release. Do not install its untested artifact on a live window.
 
 Hassfest and HACS validation check metadata. The inherited Ruff/basedpyright workflow still uses HA 2024.8.0 on Python 3.12. Neither those checks nor Python 3.13 packaging tests establish runtime compatibility with current HA. Do not run `scripts/develop` as an offline check: it starts Home Assistant.
+
+## Direct tilt-contract baseline (P2a)
+
+Use Python 3.14.2 or newer in a dedicated development environment. These tests import the real pinned HA entity classes but do not construct or start a Home Assistant instance. They use only a fake device, mock its commands, and block socket connections, DNS and HA MQTT publish/subscribe calls during each test. Do not run them inside an operating HA installation.
+
+```sh
+python3.14 -m venv .venv
+.venv/bin/python -m pip install -r requirements-tests.txt
+.venv/bin/python -m unittest discover -s tests -p test_cover_contract.py -v
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+For an existing environment, use its Python directly and install the test requirements into that environment; do not replace a working environment. `requirements-tests.txt` pins HA `2026.11.0` and the MQTT integration import dependency `paho-mqtt==2.1.0`. The **Tests / Tilt contract** job uses Python 3.14 and the same pins. Package checks select only `test_package.py`, so they remain usable without HA installed. Importing the entity can create Python bytecode caches; packaging fixtures exclude those caches instead of treating them as runtime source.
+
+Eight direct entity tests protect `WINDOW`, exactly four tilt features, absence of standard-action aliases, the tilt-position property, `is_closed`, and delegation of the four native tilt methods. The Stop case supplies an actual moving state and checks that inferred position is invalidated. The 0/1/10/30/100 entity-payload cases stop at a mocked device boundary: they do not exercise or fix the known `device.async_open(1)` command-encoding defect.
+
+This is only the initial P2/P8 slice, not the full regression harness. It does not exercise config-entry setup, the public HA service registry, MQTT transport/callbacks, availability, lifecycle, minimum HA compatibility, HACS installation, physical movement or safe holding. It does not certify measured percentage feedback or the double-stop workaround. Production Python is unchanged; no support floor or release version changes follow from these tests.
 
 ## Before any fork release
 

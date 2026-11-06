@@ -31,7 +31,7 @@ jobs:
           python-version: "3.13"
 
       - name: Test packaging without Home Assistant or network access
-        run: python3 -m unittest discover -s tests -v
+        run: python3 -m unittest discover -s tests -p test_package.py -v
 
       - name: Build the integration ZIP without rewriting its manifest
         env:
