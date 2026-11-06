@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from zipfile import ZipFile
 
 from scripts import build_release
@@ -46,17 +47,21 @@ ENV_KEYS = {
     "PYTHONUNBUFFERED",
     "PYTHONDONTWRITEBYTECODE",
     "PIP_DISABLE_PIP_VERSION_CHECK",
+    "PIP_EXTRA_INDEX_URL",
     "PIP_NO_CACHE_DIR",
     "PIP_ROOT_USER_ACTION",
     "PYTHON_VERSION",
     "PYTHON_SHA256",
+    "DOWNLOAD_SHA256",
     "GPG_KEY",
+    "GPG_KEYS",
+    "VERSION",
     "S6_OVERLAY_VERSION",
     "S6_LOGGING",
 }
 NETWORK_PROBE = """set -eu
 readlink /proc/self/ns/net
-printf '\\nINTERFACES\\n'
+printf 'INTERFACES\\n'
 ls -1 /sys/class/net
 printf 'IPV4\\n'
 cat /proc/net/route
@@ -97,6 +102,24 @@ def run(*args: str, timeout: int = 120) -> str:
     return subprocess.run(
         args, check=True, capture_output=True, timeout=timeout, text=True
     ).stdout.strip()
+
+
+def failure_location(error: Exception) -> dict:
+    """Expose only a public source location, never messages, values or source lines."""
+    frames = [
+        frame
+        for frame in traceback.extract_tb(error.__traceback__)
+        if Path(frame.filename).resolve() == Path(__file__).resolve()
+        and frame.name not in {"require", "run"}
+    ]
+    if not frames:
+        return {"source": "external"}
+    frame = frames[-1]
+    return {
+        "source": "scripts/hosted_acceptance.py",
+        "function": frame.name,
+        "line": frame.lineno,
+    }
 
 
 def sha(path: Path) -> str:
@@ -199,6 +222,8 @@ def install(archive: Path, config: Path, license_bytes: bytes) -> str:
 
 def network_observation(text: str) -> str:
     """Require one loopback interface and no usable IPv4/IPv6 external route."""
+    # run() strips the marker's newline when the final route table is empty.
+    text = text.rstrip("\n") + "\n"
     namespace, rest = text.split("\nINTERFACES\n")
     require(re.fullmatch(r"net:\[[0-9]+\]", namespace))
     interfaces, rest = rest.split("IPV4\n")
@@ -886,8 +911,9 @@ def main() -> None:
         ]
         lifecycle(sandbox, images, report)
         success = True
-    except Exception:
+    except Exception as error:
         # Never print exceptions, raw inspect, HTTP, broker logs, or storage.
+        report["failure_location"] = failure_location(error)
         report["status"] = (
             "failed"
             if any(row["status"] == "failed" for row in report["stages"])

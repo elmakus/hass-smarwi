@@ -27,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-06)
 
-The combined source checkpoint passes **227 tests and 95 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. This includes 13 dependency-free hosted-harness helper tests, not an executed hosted acceptance run. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **230 tests and 95 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. This includes 16 dependency-free hosted-harness helper tests, not an executed hosted acceptance run. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -135,7 +135,7 @@ public repository; seven days is artifact retention, not a promise to erase sour
 or job logs. Evidence contains stage verdicts, versions/digests, package/checkpoint
 hashes, containment/assertion/restore/cleanup results and hashed synthetic registry
 identity. Raw auth, HTTP, storage, inspect output, logs and checkpoint snapshots
-are never uploaded. Exceptions do not print private command output. Cleanup runs
+are never uploaded. Exceptions expose only a public orchestrator source/function/line location, never messages, values or source excerpts. Cleanup runs
 in `finally`, including termination signals, removes only exact job-created IDs
 and scratch, attempts all owned resources on failure and never prunes the host.
 Forced VM loss/SIGKILL cannot run Python cleanup; the disposable hosted VM is the
