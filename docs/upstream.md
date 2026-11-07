@@ -62,6 +62,25 @@ Each production topic had a tests-first local regression, independent read-only 
 | P4e / `41a974b` | Tests-only pending tilt-service completion across unload/reload and immediate rejected unload. Six paired service/outcome cases; replacement ownership/state, one effective active update and no extra publishes. No reproduced production defect or policy change. | [#22](https://github.com/elmakus/hass-smarwi/pull/22), code `cb7766c` | Downstream characterization; no upstream PR |
 | P4f / `43c22f5` | Native setup retry for false MQTT-client readiness, before resource allocation. Three independently reproduced red cases become green: scheduled recovery, unload/removal cancellation and active-entry preservation. No broker reconnect or command-retry policy. | [#23](https://github.com/elmakus/hass-smarwi/pull/23), code `9d03b9c` | No upstream PR |
 
+### Unreleased idle-Stop local-intent cleanup (2026-11-07)
+
+Based on `806c19b272ec19b189dc3b5a42a63f83fd121249`, this changes only
+local requested-target/owner cleanup before the cached-IDLE Stop guard. Three
+native service sequences reproduce a stale direction override after a completed
+request and idle Stop; three added delayed-publication cases reproduce retained
+targets. The prior three moving cases pass. All six regressions now pass, plus
+three completed-request boundary characterizations and three direct late-outcome
+subtests. Full suite: **256 tests and 101 subtests**, five inherited warnings;
+eleven package tests, Ruff and strict production typing pass.
+
+The earlier direct idle-Stop-preserves-owner characterization is intentionally
+updated; unchanged-status/release/availability policy remains tested. No physical
+command decision, observed movement, raw telemetry or public percentage changes.
+Early physical Stop, retraction, freshness and general direction inference remain
+unproven. No live system, release, deployment or upstream PR accompanies this topic;
+the [local-intent record](development.md#local-intent-after-stop-with-cached-idle-2026-11-07)
+separates it from the immutable published `0.4.0.dev0` source `c6017d4`.
+
 ### Native Marketplace package contract (2026-11-07)
 
 [Fork PR #30](https://github.com/elmakus/hass-smarwi/pull/30), code `34b1852`,

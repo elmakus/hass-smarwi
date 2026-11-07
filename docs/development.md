@@ -17,17 +17,18 @@ The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPE
 - Hydrate newly attached entities from cache after listener registration. Broker loss clears the session online observation without discarding telemetry. Reconnect alone cannot restore availability; retained online replay is an observation, not fresh liveness proof.
 - Validate Remote ID as a literal MQTT segment without silent normalization. Native identity/in-progress checks and stored-data matching prevent duplicate new and legacy entries without modifying existing entries.
 - Route 1% to `open;1`, zero to `close`, and every explicit tilt request to the existing command path even at an inferred equal position. Install requested intent before awaited publication; a late acknowledgement must not restore intent cleared by an actual Stop invalidation.
-- On publication failure/cancellation, discard only the request that still owns the current local intent. Identity ownership distinguishes successive requests even at the same target. Do not restore an older target, retry automatically, change observed motion or interpret failure as proof of non-delivery. Existing Stop/terminal invalidation conditions remain unchanged.
+- On publication failure/cancellation, discard only the request that still owns the current local intent. Identity ownership distinguishes successive requests even at the same target. Do not restore an older target, retry automatically, change observed motion or interpret failure as proof of non-delivery. Other terminal cleanup and wire-Stop conditions remain unchanged.
+- Every explicit tilt Stop clears the local requested target and owner, even when cached IDLE suppresses the wire command. This prevents that request from overriding later direction reporting; it does not cancel an already published device command.
 - Keep runtime device maps owned by typed config entries, with native unload/reload cleanup and tests for independent entries and bounded setup/unload failures. If MQTT client readiness returns false, use native setup retry before allocating runtime data or subscriptions.
 - Roll back failed/cancelled device subscription initialization without poisoning discovery. Preserve the provisional duplicate guard; run MQTT handlers only after all acquisitions succeed, and suppress handlers from abandoned attempts. Drain each returned native cleanup handle once.
 
 The guarded public-interface unit tests use official HA fixtures and mocked Paho transport with explicit network guards. No HA server starts or live controller is installed. Passing them does not prove device execution, target accuracy, broker replay boundaries or safe physical Stop/holding. Retained telemetry remains last known.
 
-Private motion/direction estimates remain inherited and unverified. The `OPENING` phase cannot simply be equated to physical opening toward every target. Stop-before-motion, unchanged idle telemetry, release/disconnect intent invalidation, settings transactions and physical recovery remain separate gates. Native HA tilt-toggle opens at reported zero and closes when tilt is unknown; removing stale zero can change that default branch. Use explicit native actions when intent matters. No dashboard or standard-action alias compensates for these limits.
+Private motion/direction estimates remain inherited and unverified. The `OPENING` phase cannot simply be equated to physical opening toward every target. Wire Stop before moving telemetry, unchanged idle telemetry, release/disconnect intent invalidation, settings transactions and physical recovery remain separate gates. Native HA tilt-toggle opens at reported zero and closes when tilt is unknown; removing stale zero can change that default branch. Use explicit native actions when intent matters. No dashboard or standard-action alias compensates for these limits.
 
 ## Latest combined local verification (2026-11-07)
 
-The combined source checkpoint passes **247 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is the declared development HA floor, not a firmware matrix or completed release acceptance.
+The combined source checkpoint passes **256 tests and 101 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is the declared development HA floor, not a firmware matrix or completed release acceptance.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -44,6 +45,34 @@ The eleven package unittests, pinned strict checker (zero errors/warnings), Ruff
 Main independently reran the combined checks after adding the hosted acceptance harness. Two fresh independent reviewers found no blockers in the harness; they inspected source and evidence but did not execute tests. Main's active primary-server diagnostics checked its three Python and two workflow files with zero findings and no inconclusive outcomes. Auxiliary all-server findings and earlier inconclusive results remain separate, not a universal clean-LSP claim. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result covers production modules, not the new scripts or tests. Local checks do not establish the separate authorized hosted-runtime results recorded below.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
+
+## Local intent after Stop with cached IDLE (2026-11-07)
+
+This unreleased source change clears only the requested target and its owner
+before the existing IDLE guard. A completed native request followed by Stop while
+the cached state was still IDLE previously left its direction override installed.
+Later injected motion telemetry could therefore report HA opening for the existing
+closing-code fallback, or the reverse. Three native-service regressions reproduced
+this on unchanged production, without suspending publication or claiming a physical
+race. Three added idle cases in the bounded delayed-publication test also failed;
+the existing three moving cases passed. All six now pass.
+
+The earlier direct test deliberately characterized idle Stop as preserving intent.
+That boundary changes explicitly; its unchanged-status/release/availability checks
+remain. Three added direct subtests cover late success/failure/cancellation after
+idle Stop while preserving the previous private position. Public percentage
+reporting, raw telemetry, observed motion, payloads, QoS and non-retain stay unchanged.
+No `stop` is sent while cached IDLE; the existing moving path still sends two.
+**This does not fix early physical stopping or retract a published motion command.**
+
+Three completed-request characterization cases also exercise identical open-IDLE
+status, release/fix telemetry and native broker disconnect/reconnect with retained
+online replay. These boundaries still preserve local intent until explicit Stop;
+recovery adds only the inherited `lcfa` read, not an automatic motion retry.
+This is documented existing policy, not new safety or freshness behavior. Tests use
+official HA fixtures, mocked Paho and socket/DNS guards; no live system, real
+broker outage, window movement, release asset or deployment accompanies this change.
+The published `0.4.0.dev0` remains the exact earlier `c6017d4` snapshot.
 
 ## Offline native Marketplace package contract
 

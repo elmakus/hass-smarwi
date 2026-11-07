@@ -129,13 +129,13 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
 
     @override
     async def async_stop_cover_tilt(self, **kwargs: Any) -> None:  # pyright:ignore[reportAny]
-        # Do nothing if the motor is not moving.
+        self._requested_position = -1  # unknown/none
+        self._intent_owner = None
+        # Discard local intent even when cached IDLE suppresses the wire command.
         if self.device.state_code.is_idle():
             return None
 
-        self._requested_position = -1  # unknown/none
         self._position = -1  # unknown
-        self._intent_owner = None
         await self.device.async_stop()
 
     @override
