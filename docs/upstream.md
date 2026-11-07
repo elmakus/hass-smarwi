@@ -57,7 +57,8 @@ Each production topic had a tests-first local regression, independent read-only 
 
 ### Native Marketplace package contract (2026-11-07)
 
-The downstream `test/native-marketplace-contract` topic is based on `ddae9473e2e8596b6df48e780433abdfbae06708`.
+[Fork PR #30](https://github.com/elmakus/hass-smarwi/pull/30), code `34b1852`,
+is based on `ddae9473e2e8596b6df48e780433abdfbae06708`.
 Five offline cases reuse the existing candidate ZIP builder, official HA fixture
 and real native Marketplace prepare/write/backup code. They cover exact first and
 replacement writes with stale-file removal, old-tree restoration after invalid
