@@ -55,6 +55,26 @@ Each production topic had a tests-first local regression, independent read-only 
 | P4e / `41a974b` | Tests-only pending tilt-service completion across unload/reload and immediate rejected unload. Six paired service/outcome cases; replacement ownership/state, one effective active update and no extra publishes. No reproduced production defect or policy change. | [#22](https://github.com/elmakus/hass-smarwi/pull/22), code `cb7766c` | Downstream characterization; no upstream PR |
 | P4f / `43c22f5` | Native setup retry for false MQTT-client readiness, before resource allocation. Three independently reproduced red cases become green: scheduled recovery, unload/removal cancellation and active-entry preservation. No broker reconnect or command-retry policy. | [#23](https://github.com/elmakus/hass-smarwi/pull/23), code `9d03b9c` | No upstream PR |
 
+### Native Marketplace package contract (2026-11-07)
+
+The downstream `test/native-marketplace-contract` topic is based on `ddae9473e2e8596b6df48e780433abdfbae06708`.
+Five offline cases reuse the existing candidate ZIP builder, official HA fixture
+and real native Marketplace prepare/write/backup code. They cover exact first and
+replacement writes with stale-file removal, old-tree restoration after invalid
+written domain/version, and failed first-write cleanup after invalid nested layout.
+Only download response bytes are replaced; an exact three-URL sequence and socket
+and DNS guards bound the test. No production, metadata, dependency, workflow or
+builder change is included. No upstream PR, release or deployment follows.
+
+Main independently verified **246 tests and 98 subtests, no xfails**, five inherited
+third-party warnings; eleven package unittests, Ruff lint/scoped format, pinned
+strict basedpyright 1.10.4 with zero errors/warnings/notes in production scope,
+122-package compatibility and diff checks pass. These are characterization tests,
+not red-before-fix regressions. The [development boundary](development.md#offline-native-marketplace-package-contract)
+excludes public installation, persisted version/cache/import, real downloads,
+accounts/releases, legacy HACS, interrupted recovery and physical acceptance.
+Native distribution remains an incomplete release gate.
+
 ### Raw error-code diagnostic (2026-11-07)
 
 [Fork PR #28](https://github.com/elmakus/hass-smarwi/pull/28), based on `ce8d31a`,
