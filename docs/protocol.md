@@ -54,7 +54,8 @@ Inherited implementation choices, not vendor guarantees:
 - `lcfa` requests settings; `scfa01/1|` precedes encoded newline `key:value` writes.
   These settings payloads are not documented by the cited vendor pages.
 - Moving Stop sends two `stop` payloads; fixation on/off conditionally sends one
-  `stop` using cached fixation state. Neither physical outcome is verified.
+  `stop` using cached fixation state. A bounded moving-Stop test below observed
+  subsequent IDLE telemetry, not measured halt or holding; fixation toggles remain unverified.
   The UI's Stop/Release/Hold description does not prove that wire mapping.
   Do not automatically substitute documented `fix`, duplicate or retry Stop.
 
@@ -138,14 +139,17 @@ No broker port, TLS capability, firmware QoS, heartbeat or offline deadline is i
 | [Offline native package contract](development.md#offline-native-marketplace-package-contract) | Five private prepare/write cases: exact candidate ZIP bytes on first/replacement write, stale removal, invalid-domain/version old-tree restoration and invalid-layout first-write cleanup. Real native metadata, extraction, validation and backup; download bytes mocked and network blocked. | Public install/update service, persisted version/cache/import, real downloads/account/release, legacy HACS, restart/downgrade, complete ZIP security or physical acceptance. |
 | [Actual manual installation](development.md#actual-manual-installation-acceptance-2026-11-07) | Current `d77460b` → reference `ce8d31a` → current exact file trees on HAOS/Core2026.11.0; three actual restarts, public config-flow form/cancel and final config validation. | Versioned releases, native Marketplace/HACS, backwards migrated state or configured hardware. |
 | [Actual synthetic MQTT lifecycle](development.md#actual-synthetic-mqtt-lifecycle-2026-11-07) | Real configured HA/EMQX path in an isolated synthetic namespace; four tilt actions and exact command callback sequence, availability, bounded malformed rejection/recovery, native reload and scoped cleanup. | Independent MQTT receipt/QoS capture, broker-failure stress, physical execution/Stop/holding, settings safety or native release installation. |
+| [Published native prerelease installation](development.md#published-prerelease-and-native-installation-2026-11-07) | Exact `0.4.0.dev0` asset/install bytes, public warning acceptance, prerelease opt-in, native download and repository/version persistence after restart. | New GitHub account setup, legacy HACS, native update/downgrade/reinstall or migrated-state recovery. |
+| [Bounded real-device test](development.md#bounded-real-device-telemetry-acceptance-2026-11-07) | Firmware `3.4.1-15-g3d0f`, all four native tilt actions, actual moving telemetry before one Stop call (two inherited payloads), subsequent IDLE, final closed/zero telemetry and configured restart with stable entry/device/cover identity. | Visual position, calibrated 1%, halt latency/force, mechanical holding, Fix/release, Stop-before-motion, broker-fault/replay coverage, freshness or general firmware/safety acceptance. |
 | [Synthetic hosted acceptance](development.md#manual-synthetic-hosted-acceptance) | Exact manual A/B package bytes, matching stopped checkpoint recovery, real isolated broker receipt, stable identity, and retained closed status plus HA closed/zero before fresh fixture publication on restored A. | Native HACS/Marketplace workflows, A reading B-migrated state, general replay/freshness, an independent causal trace of HA updates, firmware or physical Stop/holding. |
 
-Consult the ledger and recorded hosted results for exact versions, source commits
-and observed scope. The named synthetic manual transition is tested, not every
-release or migration. Supervised hardware, broader broker/session failure and
-replay/freshness, native distribution acceptance and current-stable HA release
-validation remain gates. Older HA compatibility is outside the testing scope.
-Any future hardware test needs fresh operator readiness and specific test agreement,
-physical safety controls available, and one controller only. No automatic close,
-Stop or Fix health probe, blind retry, jam test or second controller is permitted.
-Network Stop is not a substitute for the physical safety controls.
+Consult the ledger and recorded results for exact versions, source commits and
+observed scope. Historical synthetic/manual exclusions apply to those tests;
+the later prerelease native installation and bounded device telemetry test do not
+close all release gates. Holding, Stop-before-motion, settings safety, broader
+broker/session failure and replay/freshness remain open. Older HA compatibility
+is outside the testing scope. Further bounded hardware testing is permitted only
+with fresh operator readiness and specific authorization, physical safety controls
+available, and one controller only. No automatic close, Stop or Fix health probe,
+blind retry, jam test or second controller is permitted. Network Stop is not a
+substitute for the physical safety controls.
