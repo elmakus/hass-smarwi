@@ -187,10 +187,22 @@ HA `2026.11.0`, Python `3.14.10`, Mosquitto `2.0.22`, Paho `2.1.0`, aiohttp
 Main verified the artifact digest and installed hashes independently against Git
 blobs. That run published fresh telemetry before state assertions; it does **not**
 establish the later pre-publication retained-state assertion described above.
+The stronger retained-state scope passed in
+[run 42315158582](https://github.com/elmakus/hass-smarwi/actions/runs/42315158582)
+at code commit `e6fa58ccfebacaf675550f9db96b738f1122db68`, using the same observed
+versions. Terminal fixture states were closed, open, closed. Restored A received
+retain-flagged closed status and HA reported the existing cover closed/zero before
+fresh fixture publication. Exact source/install hashes, stable identity, matching
+checkpoint bytes, containment and disposal of both containers/scratch passed.
+Main independently verified the artifact SHA256 against GitHub metadata and the
+installed-tree hashes against exact Git blobs. This paired broker/HA observation
+does not independently trace how HA obtained that state or prove general replay,
+freshness, backward migration or physical behavior.
+
 The preceding run `42310285561` was blocked before application stages and cleaned
-up; it is not a pass. Neither result establishes native distribution or physical
-acceptance. Artifact retention is finite; retain sanitized receipts or reproduce
-only with renewed applicable runtime approval.
+up; it is not a pass. None of these results establishes native distribution or
+physical acceptance. Artifact retention is finite; retain sanitized receipts or
+reproduce only with renewed applicable runtime approval.
 
 ## Consistent formatting
 
