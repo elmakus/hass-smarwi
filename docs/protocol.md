@@ -125,6 +125,10 @@ provisional and abandoned-attempt callbacks. This is HA resource ownership, not 
 firmware acknowledgement or freshness handshake. Native subscribe currently does
 not yield; test-only suspension does not establish actual broker replay ordering.
 Handlers already executing after successful initialization remain a separate limit.
+Discovery callback entry also rejects a captured runtime map removed or replaced by
+native unload/setup; a rejected unload retains ownership. Tests deliberately delay
+a wrapper before callback entry, not natural broker timing. Discovery already in
+progress and arbitrary replay remain outside this guard.
 
 Inherited settings handling replaces its cached response, filters `cvdist`, copies
 the cached dictionary for a write, then requests refresh without awaiting a correlated

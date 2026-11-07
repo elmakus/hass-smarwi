@@ -62,6 +62,28 @@ Each production topic had a tests-first local regression, independent read-only 
 | P4e / `41a974b` | Tests-only pending tilt-service completion across unload/reload and immediate rejected unload. Six paired service/outcome cases; replacement ownership/state, one effective active update and no extra publishes. No reproduced production defect or policy change. | [#22](https://github.com/elmakus/hass-smarwi/pull/22), code `cb7766c` | Downstream characterization; no upstream PR |
 | P4f / `43c22f5` | Native setup retry for false MQTT-client readiness, before resource allocation. Three independently reproduced red cases become green: scheduled recovery, unload/removal cancellation and active-entry preservation. No broker reconnect or command-retry policy. | [#23](https://github.com/elmakus/hass-smarwi/pull/23), code `9d03b9c` | No upstream PR |
 
+### Delayed discovery callback ownership (2026-11-07)
+
+Based on `bc2ee279000b8ced0cdb6e682c118bbfe939dd5a`, the discovery callback now
+rejects entry if its captured device map no longer owns `entry.runtime_data`.
+Two guarded native HA/MQTT cases reproduced stale insertion and subscription
+acquisition after successful unload or unload/setup replacement; both pass after
+the identity guard. A third rejected-unload characterization passed before and
+after, preserving active discovery. All cases deliberately delay a test wrapper
+before the original callback enters, not a demonstrated natural broker schedule.
+Normal rediscovery, one cover, one changed-status dispatch and once-only successful
+cleanup are checked. Full local verification passes 259 tests/101 subtests, eleven
+package unittests, Ruff/scoped format, strict production typing with zero findings,
+122-package compatibility and diff checks; five inherited warnings remain. Both
+changed Python paths have clean active primary-server diagnostics. Independent
+source review found no blockers and did not execute tests.
+
+No command, setting, entity identity, transport or availability policy changes.
+Already-running handlers and arbitrary replay remain separate limits. No upstream
+PR, release or deployment accompanies this downstream source change; immutable dev1
+and the earlier physical/installation evidence are unchanged. See the
+[bounded callback-entry record](development.md#delayed-discovery-callback-ownership-2026-11-07).
+
 ### Idle-Stop local-intent cleanup: original unreleased checkpoint (2026-11-07)
 
 Based on `806c19b272ec19b189dc3b5a42a63f83fd121249`, this changes only
