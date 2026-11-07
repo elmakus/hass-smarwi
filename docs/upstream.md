@@ -117,7 +117,7 @@ Code commit `641f6b4` passed [Tilt contract](https://github.com/elmakus/hass-sma
 
 - Fork owner, support, documentation, HACS custom-repository links, and default branch point to elmakus rather than upstream. Existing copyright notices remain intact.
 - Source version `0.4.0.dev0` identifies an unreleased fork baseline. It is not upstream v0.3.5 or a tested compatibility promise.
-- The inherited, untested HACS minimum was removed. A tested minimum is a release gate, not inferred from the old dependency pins.
+- P1a removed the inherited, untested HACS minimum. The current-stable policy now declares tested development floor `2026.11.0`, aligned with the runtime, strict checker and official fixtures. Older HA compatibility is outside scope; the floor does not establish native installer or physical acceptance.
 - ZIPs contain flat integration files and the unchanged root license. The builder checks exact version/asset agreement instead of rewriting a manifest from a tag.
 - The package workflow produces inspection-only Actions artifacts. Automatic upload on a published GitHub release is removed until release gates pass. Workflow action references are pinned to inspected commit SHAs, repository permissions are read-only, and checkout credentials are not persisted.
 - P1a left production Python unchanged. Later parser, lifecycle, configuration and command/reporting topics are tracked separately above. `WINDOW` and exactly the four tilt features remain; there are no standard-action aliases or UI-driven feature conversions.

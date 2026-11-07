@@ -1,8 +1,9 @@
 # Development MQTT protocol and safety boundaries
 
 This is a development reference, not an actuation recipe or hardware certification.
-Source version remains `0.4.0.dev0`; no tested firmware matrix or HA support range
-is established. The fork includes a 1% encoding fix and broker-session gate;
+Source version remains `0.4.0.dev0`; no tested firmware matrix is established.
+The [development HA baseline](development.md#current-stable-home-assistant-policy)
+targets the latest stable release only, not historical-version compatibility. The fork includes a 1% encoding fix and broker-session gate;
 merged code and passing CI are not complete release acceptance. Consult the
 [upstream ledger](upstream.md) for accepted versions/topic status and the
 [release gates](development.md#before-any-fork-release) before installation.
@@ -139,8 +140,8 @@ No broker port, TLS capability, firmware QoS, heartbeat or offline deadline is i
 Consult the ledger and recorded hosted results for exact versions, source commits
 and observed scope. The named synthetic manual transition is tested, not every
 release or migration. Supervised hardware, broader broker/session failure and
-replay/freshness, native distribution acceptance and a supported HA range remain
-release gates.
+replay/freshness, native distribution acceptance and current-stable HA release
+validation remain gates. Older HA compatibility is outside the testing scope.
 Any future hardware test needs fresh operator readiness and specific test agreement,
 physical safety controls available, and one controller only. No automatic close,
 Stop or Fix health probe, blind retry, jam test or second controller is permitted.

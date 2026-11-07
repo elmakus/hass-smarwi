@@ -43,6 +43,22 @@ class PackageTests(unittest.TestCase):
         """Stage a fixture without creating commits or configuring a Git identity."""
         subprocess.run(["git", "-C", str(self.root), "add", "--", path], check=True)
 
+    def test_ha_minimum_matches_development_baseline(self) -> None:
+        """Keep the installer floor aligned with the one tested HA/fixture version."""
+        metadata = json.loads((self.root / "hacs.json").read_text(encoding="utf-8"))
+        version = metadata["homeassistant"]
+        for filename in ("requirements.txt", "requirements-tests.txt"):
+            requirements = (
+                (SOURCE_ROOT / filename).read_text(encoding="utf-8").splitlines()
+            )
+            self.assertIn(f"homeassistant=={version}", requirements)
+        test_requirements = (
+            (SOURCE_ROOT / "requirements-tests.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        self.assertIn(f"pytest-homeassistant=={version}", test_requirements)
+
     def test_flat_archive_preserves_sources_and_license(self) -> None:
         """Ship exactly the integration contents and unchanged root license."""
         expected = {

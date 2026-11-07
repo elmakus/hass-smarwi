@@ -6,7 +6,7 @@ See the [development MQTT protocol and safety boundaries](protocol.md) for evide
 
 This is an independently maintained, MQTT-only fork of `jirutka/hass-smarwi`, based on upstream v0.3.5 (`6a528f35a695bfb5b70e5fe22eb113a163ef7999`). Parser, state-reporting, lifecycle and configuration fixes are independent topics. The [upstream ledger](upstream.md) records their fork PRs, exact scope and publication status. Historical baseline counts below are not current totals.
 
-The source version is `0.4.0.dev0`, not a published or hardware-tested release. There is no validated Home Assistant support range or firmware matrix. The inherited `homeassistant: 2024.1.0` HACS declaration was removed because it was not backed by tests. Omitting that filter does not mean every Home Assistant version works. A tested minimum must be declared before publishing a release.
+The source version is `0.4.0.dev0`, not a published or hardware-tested release. The development target is the latest stable Home Assistant only; older versions are outside the testing scope. On 2026-11-07, the [official latest release](https://github.com/home-assistant/core/releases/tag/2026.11.0) is `2026.11.0`, matching the existing runtime, official fixtures and strict-type-check baseline. `hacs.json` now declares that tested development floor instead of the inherited, previously removed untested `2024.1.0` value. This is not a firmware matrix or completed native installation/physical acceptance.
 
 The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. Standard cover controls, standard-action aliases, HTTP control/polling/fallback, dashboard dependencies, and additional actuator entities are outside scope.
 
@@ -27,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-07)
 
-The combined source checkpoint passes **240 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **241 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is the declared development HA floor, not a firmware matrix or completed release acceptance.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -39,17 +39,36 @@ python3 -m unittest discover -s tests -p test_package.py -v
 git diff --check
 ```
 
-The ten package unittests, pinned strict checker (zero errors/warnings), Ruff, scoped formatting and installed-dependency check (122 compatible packages) pass. The offline tool command assumes its pinned tool is already cached; initial dependency/tool installation can need network access. Reuse existing environments and do not start `scripts/develop`.
+The eleven package unittests, pinned strict checker (zero errors/warnings), Ruff, scoped formatting and installed-dependency check (122 compatible packages) pass. The offline tool command assumes its pinned tool is already cached; initial dependency/tool installation can need network access. Reuse existing environments and do not start `scripts/develop`.
 
 Main independently reran the combined checks after adding the hosted acceptance harness. Two fresh independent reviewers found no blockers in the harness; they inspected source and evidence but did not execute tests. Main's active primary-server diagnostics checked its three Python and two workflow files with zero findings and no inconclusive outcomes. Auxiliary all-server findings and earlier inconclusive results remain separate, not a universal clean-LSP claim. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result covers production modules, not the new scripts or tests. Local checks do not establish the separate authorized hosted-runtime results recorded below.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
 
+## Current-stable Home Assistant policy
+
+Test the latest stable HA release only. Keep that version pinned explicitly in
+`requirements.txt` and `requirements-tests.txt`, with the matching official
+`pytest-homeassistant` fixtures. Do not add historical-version jobs or compatibility
+shims solely to support older HA installations. On a future baseline update, inspect
+release changes, rerun the existing checks and update the HACS floor together.
+The offline package test checks this alignment; it does not query the network or
+prove that a pinned version is still the latest. Refresh that fact from the
+[official release list](https://github.com/home-assistant/core/releases) when updating.
+
+The native [`homeassistant` metadata key](https://contributors.home-assistant.io/marketplace/reference/hacs-json/)
+is a lower-version filter for released repositories, not an exact-version lock,
+an upper bound or a guarantee about untested future HA versions. It does not
+create a release or validate the installer, firmware, delivery or physical safety.
+Manual file extraction does not enforce this metadata. No custom runtime version
+check, dependency, automatic updater or new version-test framework is added.
+
 ## Roadmap assessment (2026-11-07)
 
 The next release work remains reliability and compatibility, not a larger actuator
-feature list. Native distribution install/update/recovery, a tested HA range,
-broader broker/session behavior and supervised physical acceptance remain gates.
+feature list. Native distribution install/update/recovery, current-stable HA
+validation, broader broker/session behavior and supervised physical acceptance
+remain gates. Older HA compatibility is not a release requirement.
 The completed historical hosted milestone is not repeated or extended by this topic.
 
 | Candidate | Decision and evidence boundary |
@@ -370,13 +389,13 @@ P3b's original results are offline evidence, not upstream acceptance or a firmwa
 
 ## Before any fork release
 
-1. Add an HA regression harness and test the declared minimum and current stable HA. Record exact test dependencies and Python versions.
+1. Run the existing HA regression harness and strict checker on the latest stable HA only. Keep the tested baseline, matching official fixtures and HACS floor aligned; record exact dependencies and Python versions. No older-HA matrix is required.
 2. Assert the exact tilt-only feature mask, native tilt-service payloads, and tilt-position reporting. Keep observed state separate from inferred percentages.
 3. Resolve parser, cached-state, availability, command-boundary, and inference defects in separate topics. Passing package tests does not close these gates.
 4. Obtain specific authorization for each HA, broker, or hardware test. Use a disposable simulator before reconnect/failure tests on a live device. Never run two controllers against one device.
 5. Verify firmware-specific stop/holding behavior, settings transactions, broker replay boundaries, device recovery, and physical safety controls. No blind retries or movement/Stop/Fix health probes. Do not enable writable calibrated distance without evidence.
 6. Validate installation, update, and rollback with HACS and manual packages in an authorized disposable environment. Record firmware, HA, broker/session settings, test results, and limitations without credentials or private traces.
-7. Set a tested HACS minimum, choose the independent fork version, and keep manifest, exact tag, changelog, and ZIP version consistent. Preserve license notices and build our own asset. Do not reuse upstream release assets.
+7. Recheck the current-stable HACS floor, choose the independent fork version, and keep manifest, exact tag, changelog, and ZIP version consistent. Preserve license notices and build our own asset. Do not reuse upstream release assets.
 8. Review the release policy and tooling before enabling publication. Publishing releases is separate from producing an Actions artifact. No tag or release is part of P1a.
 
 There is no migration framework, broad historic support promise, or safety certification. Network Stop is not an emergency-stop guarantee. See the [upstream ledger](upstream.md) for intentional divergence and topic tracking.
