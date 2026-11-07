@@ -109,6 +109,15 @@ QoS/publish success is not execution ACK, physical completion, no-replay protect
 or an emergency stop. No command expiry, safe retry or firmware deduplication is
 established; do not claim that a connectivity gate prevents all queued replay.
 
+Explicit tilt Stop now clears the local requested target and owner even if cached
+IDLE suppresses wire Stop. This is an unreleased reporting/ownership fix, not
+cancellation of a published command or proof of physical stopping. IDLE still
+sends no `stop`; moving Stop still sends two. Identical open-IDLE status,
+release/fix telemetry and availability-only disconnect/recovery still preserve
+intent until an explicit Stop or existing terminal cleanup. Offline native-service
+tests characterize these limits without an automatic motion retry. See the
+[local-intent regression](development.md#local-intent-after-stop-with-cached-idle-2026-11-07).
+
 Per-device subscription initialization now rolls back returned handles and its owned
 discovery reservation on failure/cancellation. A local readiness gate suppresses
 provisional and abandoned-attempt callbacks. This is HA resource ownership, not a

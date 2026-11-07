@@ -268,20 +268,30 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
         """Stop/error/actual idle cleanup disown ACKs, preserving terminal estimates."""
         self.device.name = "Offline fixture"
         with patch.object(self.cover, "async_write_ha_state"):
-            for invalidation in ("stop", "error", "closed_idle", "open_idle"):
+            for invalidation in (
+                "stop",
+                "idle_stop",
+                "error",
+                "closed_idle",
+                "open_idle",
+            ):
                 for outcome in ("success", "failure", "cancel"):
                     with self.subTest(invalidation=invalidation, outcome=outcome):
                         self.device.closed = False
-                        self.device.state_code = StateCode.OPENING
-                        self.cover._is_moving = True
+                        self.device.state_code = (
+                            StateCode.IDLE
+                            if invalidation == "idle_stop"
+                            else StateCode.OPENING
+                        )
+                        self.cover._is_moving = invalidation != "idle_stop"
                         self.cover._position = 10
                         task, result = await self._pending_request(
                             self.cover.async_open_cover_tilt(), self.device.async_open
                         )
                         self.assertIsNotNone(self.cover._intent_owner)
-                        if invalidation == "stop":
+                        if invalidation in ("stop", "idle_stop"):
                             await self.cover.async_stop_cover_tilt()
-                            expected = -1
+                            expected = 10 if invalidation == "idle_stop" else -1
                         else:
                             self.device.closed = invalidation == "closed_idle"
                             self.device.state_code = (
@@ -317,8 +327,8 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(self.cover._requested_position, -1)
                         self.assertIsNone(self.cover._intent_owner)
 
-    async def test_noninvalidating_updates_and_idle_stop_preserve_owner(self) -> None:
-        """Keep inherited idle/release/availability limitations explicit."""
+    async def test_noninvalidating_updates_preserve_owner(self) -> None:
+        """Keep unchanged-status/release/availability limitations explicit."""
         self.device.name = "Offline fixture"
         task, result = await self._pending_request(
             self.cover.async_open_cover_tilt(), self.device.async_open
@@ -326,7 +336,6 @@ class CoverContractTests(unittest.IsolatedAsyncioTestCase):
         owner = self.cover._intent_owner
         self.assertIsNotNone(owner)
         with patch.object(self.cover, "async_write_ha_state"):
-            await self.cover.async_stop_cover_tilt()
             for props in (
                 set(),
                 {SmarwiDeviceProp.AVAILABLE},
