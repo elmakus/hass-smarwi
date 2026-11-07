@@ -19,7 +19,7 @@ The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPE
 - Route 1% to `open;1`, zero to `close`, and every explicit tilt request to the existing command path even at an inferred equal position. Install requested intent before awaited publication; a late acknowledgement must not restore intent cleared by an actual Stop invalidation.
 - On publication failure/cancellation, discard only the request that still owns the current local intent. Identity ownership distinguishes successive requests even at the same target. Do not restore an older target, retry automatically, change observed motion or interpret failure as proof of non-delivery. Other terminal cleanup and wire-Stop conditions remain unchanged.
 - Every explicit tilt Stop clears the local requested target and owner, even when cached IDLE suppresses the wire command. This prevents that request from overriding later direction reporting; it does not cancel an already published device command.
-- Keep runtime device maps owned by typed config entries, with native unload/reload cleanup and tests for independent entries and bounded setup/unload failures. If MQTT client readiness returns false, use native setup retry before allocating runtime data or subscriptions.
+- Keep runtime device maps owned by typed config entries, with native unload/reload cleanup and tests for independent entries and bounded setup/unload failures. Reject delayed discovery callback entry when its captured map no longer owns `entry.runtime_data`. If MQTT client readiness returns false, use native setup retry before allocating runtime data or subscriptions.
 - Roll back failed/cancelled device subscription initialization without poisoning discovery. Preserve the provisional duplicate guard; run MQTT handlers only after all acquisitions succeed, and suppress handlers from abandoned attempts. Drain each returned native cleanup handle once.
 
 The guarded public-interface unit tests use official HA fixtures and mocked Paho transport with explicit network guards. No HA server starts or live controller is installed. Passing them does not prove device execution, target accuracy, broker replay boundaries or safe physical Stop/holding. Retained telemetry remains last known.
@@ -364,6 +364,34 @@ A failed per-device subscription acquisition previously left its provisional dev
 Main independently reproduced ten initial red cases against unchanged production source. Seventeen final public HA/MQTT cases cover all three acquisition boundaries, error/cancellation, direct unload or retry, duplicate discovery, retained-marked status, successful/rejected unload, late-returned handles and another active entry. The seven additional cases were not separately claimed as red before production. The exact cover identity and four tilt features remain asserted.
 
 Native HA 2026.11 public subscribe currently registers without yielding. Deliberately suspended acquisitions characterize defensive robustness, not demonstrated broker timing. The gate does not cancel original handlers already executing after commit or solve every queued discovery/unload race. Native registration failures before returning a handle and removal-callback failures remain unproven. Failed attempts keep an inert drained unload closure until entry teardown. These are software ownership guarantees, not firmware, freshness or physical-safety evidence.
+
+## Delayed discovery callback ownership (2026-11-07)
+
+An already-dispatched MQTT discovery job can retain an old entry map after native
+unsubscribe. Three guarded public-HA cases deliberately hold a wrapper before the
+original discovery callback enters. Successful unload and unload/setup replacement
+both reproduced stale-device insertion and acquisition of three subscriptions into
+the abandoned generation. Rejected platform unload preserved the active map and
+passed before the fix. The callback now compares its captured map with the current
+`entry.runtime_data` by identity before allocating a device or subscribing. Missing
+or replacement runtime data rejects the old invocation; rejected unload remains active.
+
+All three cases pass. They assert no stale subscriptions, premature entities,
+dispatches or publishes; normal subsequent discovery creates one cover, a changed
+status dispatches once, and each owned cleanup runs once on successful teardown.
+The rejected-unload case stays active and cannot be unloaded again in pinned HA.
+Full local verification passes **259 tests and 101 subtests**, five inherited warnings,
+eleven package unittests, Ruff/scoped formatting, strict production typing with zero
+errors/warnings/notes, 122-package compatibility and diff checks. Active primary-server
+probes for both changed Python files report no findings. Independent source review
+found no blockers; the reviewer did not rerun tests.
+
+The wait is test-only: this does not demonstrate natural broker timing or an actual
+outage. Handlers already inside discovery or a committed device handler remain
+outside this narrow callback-entry guard. No scheduler, retry, command/Stop/Fix,
+settings, identity, availability, dependency or version policy changes. No live HA,
+physical movement, release or deployment accompanies this source change; published
+and installed dev1 remain unchanged. This is not a complete quality-tier claim.
 
 ## Pending native tilt-service lifecycle (P4e)
 

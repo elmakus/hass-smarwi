@@ -43,6 +43,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: SmarwiConfigEntry) -> bo
     )
 
     async def device_discovery(msg: mqtt.ReceiveMessage) -> None:
+        # Native unsubscribe does not retract an already queued MQTT job.
+        if getattr(entry, "runtime_data", None) is not devices:
+            return
         # Topic looks like ion/<remote_id>/%<device_id>/online.
         device_segment = msg.topic.split("/")[2]
         if not device_segment.startswith("%") or len(device_segment) == 1:
