@@ -10,7 +10,7 @@ This independently maintained fork of [jirutka/hass-smarwi][upstream] uses only 
 The top-mounted actuator controls window tilt. Its single `WINDOW` cover exposes only `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. There are no standard cover-action aliases or standard position controls. Use native tilt actions in dashboards and automations.
 
 > [!WARNING]
-> Development only: no independently tested fork release exists yet. This fork includes software fixes recorded in the upstream ledger. No Home Assistant support range or firmware compatibility has been validated. Do not install this baseline on a live window.
+> Development only: no independently tested fork release exists yet. This fork includes software fixes recorded in the upstream ledger. The development baseline is Home Assistant `2026.11.0`, the latest stable release checked on 2026-11-07. Older HA versions are outside the testing scope; firmware compatibility and release acceptance remain unvalidated. Do not install this baseline on a live window.
 >
 > Public tilt percentage is zero only for accepted closed telemetry, including cache; otherwise it is unknown. Requested targets and private motion/direction estimates are not measured feedback. Stop/holding, real broker replay, freshness and settings safety remain unverified. Do not treat network Stop as an emergency-stop guarantee or enable writable calibrated distance. Keep the physical safety controls available.
 
