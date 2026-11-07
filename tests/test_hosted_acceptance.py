@@ -366,10 +366,30 @@ class HostedAcceptanceTests(unittest.TestCase):
             "nonclosed_unknown": True,
             "open_1_received": True,
             "reload_identity": True,
+            "terminal_position": "closed",
+            "restored_retained_before_publish": False,
         }
-        safe = hosted.sanitize_smoke(value)
+        safe = hosted.sanitize_smoke(value, "A")
         self.assertNotIn("identity", safe)
         self.assertNotIn("synthetic-id", json.dumps(safe))
+        for stage in ("A", "B", "restored-A"):
+            observed = {
+                **value,
+                "terminal_position": "open" if stage == "B" else "closed",
+                "restored_retained_before_publish": stage == "restored-A",
+            }
+            with self.subTest(stage=stage):
+                self.assertEqual(
+                    hosted.sanitize_smoke(observed, stage)["terminal_position"],
+                    observed["terminal_position"],
+                )
+                for changed in (
+                    {"terminal_position": "closed" if stage == "B" else "open"},
+                    {"restored_retained_before_publish": stage != "restored-A"},
+                    {"restored_retained_before_publish": int(stage == "restored-A")},
+                ):
+                    with self.assertRaises(hosted.Blocked):
+                        hosted.sanitize_smoke({**observed, **changed}, stage)
         for bad in (
             {**value, "token": "private"},
             {**value, "features": 255},
@@ -377,7 +397,9 @@ class HostedAcceptanceTests(unittest.TestCase):
             {**value, "identity": {**value["identity"], "id": "Bearer secret"}},
         ):
             with self.assertRaises(hosted.Blocked):
-                hosted.sanitize_smoke(bad)
+                hosted.sanitize_smoke(bad, "A")
+        with self.assertRaises(hosted.Blocked):
+            hosted.sanitize_smoke(value, "unknown-stage")
 
     def test_cleanup_attempts_all_owned_ids_after_failure(self) -> None:
         """Never prune globally or stop cleanup after one exact-ID removal fails."""

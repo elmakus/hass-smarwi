@@ -327,8 +327,9 @@ def validate_container(
     require(dict(item.split("=", 1) for item in config["Env"]) == expected_env)
 
 
-def sanitize_smoke(value: dict) -> dict:
+def sanitize_smoke(value: dict, stage: str) -> dict:
     """Copy only explicitly asserted synthetic observations, never native responses."""
+    require(stage in {"A", "B", "restored-A"})
     require(
         set(value)
         == {
@@ -339,9 +340,13 @@ def sanitize_smoke(value: dict) -> dict:
             "nonclosed_unknown",
             "open_1_received",
             "reload_identity",
+            "terminal_position",
+            "restored_retained_before_publish",
         }
     )
     require(value["features"] == 240)
+    require(value["terminal_position"] == ("open" if stage == "B" else "closed"))
+    require(value["restored_retained_before_publish"] is (stage == "restored-A"))
     for key in (
         "window",
         "closed_zero",
@@ -763,6 +768,7 @@ onboarding:
                 "-P",
                 "/input/runtime.py",
                 "smoke",
+                stage,
                 timeout=480,
             )
         except subprocess.CalledProcessError as error:
@@ -780,7 +786,7 @@ onboarding:
             raise Blocked("native client did not complete") from None
         row["status"] = "failed"
         row["phase"] = "assertions"
-        observed = sanitize_smoke(json.loads(output))
+        observed = sanitize_smoke(json.loads(output), stage)
         if baseline is None:
             baseline = observed["identity_sha256"]
         require(observed["identity_sha256"] == baseline)

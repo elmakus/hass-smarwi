@@ -115,7 +115,7 @@ Changing brokers can disable vendor service; dual-broker operation is not promis
 Device plans can still act independently; Wi-Fi-off periods prevent remote control.
 No broker port, TLS capability, firmware QoS, heartbeat or offline deadline is inferred.
 
-## Mock evidence versus remaining acceptance
+## Software evidence versus remaining acceptance
 
 | Evidence boundary | What it establishes | What it does not establish |
 | --- | --- | --- |
@@ -123,10 +123,13 @@ No broker port, TLS capability, firmware QoS, heartbeat or offline deadline is i
 | [HA service/MQTT tests](../tests/test_cover_services.py) | Real config-entry/platform/service paths with synthetic messages and mocked Paho: payload/QoS/non-retain assertions, 1% target, rejection, hydration, session gating, initialization rollback/retry and bounded unload cases. | Real broker replay/session persistence, execution ACK, fresh hardware telemetry or safe Stop/Fix. |
 | [Decoder tests](../tests/test_keyval.py) | Parser syntax/rejection cases. | Firmware field domains or snapshot completeness. |
 | [Package tests](../tests/test_package.py) | Offline archive/metadata boundaries. | HACS installation, upgrade, rollback or supported HA range. |
+| [Synthetic hosted acceptance](development.md#manual-synthetic-hosted-acceptance) | Exact manual A/B package bytes, matching stopped checkpoint recovery, real isolated broker receipt, stable identity, and retained closed status plus HA closed/zero before fresh fixture publication on restored A. | Native HACS/Marketplace workflows, A reading B-migrated state, general replay/freshness, an independent causal trace of HA updates, firmware or physical Stop/holding. |
 
-These are test assertions, not newly executed results here; consult the ledger for
-recorded runs and accepted scope. Supervised hardware, real-broker/session recovery
-and disposable HACS/manual install/update/rollback acceptance remain release gates.
+Consult the ledger and recorded hosted results for exact versions, source commits
+and observed scope. The named synthetic manual transition is tested, not every
+release or migration. Supervised hardware, broader broker/session failure and
+replay/freshness, native distribution acceptance and a supported HA range remain
+release gates.
 Any future hardware test needs fresh operator readiness and specific test agreement,
 physical safety controls available, and one controller only. No automatic close,
 Stop or Fix health probe, blind retry, jam test or second controller is permitted.
