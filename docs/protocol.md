@@ -1,7 +1,7 @@
 # Development MQTT protocol and safety boundaries
 
 This is a development reference, not an actuation recipe or hardware certification.
-Source version is the `0.4.0.dev1` candidate; published `0.4.0.dev0` remains immutable.
+Published experimental source version is `0.4.0.dev1`; published `0.4.0.dev0` remains immutable.
 No tested firmware matrix is established.
 The [development HA baseline](development.md#current-stable-home-assistant-policy)
 targets the latest stable release only, not historical-version compatibility. The fork includes a 1% encoding fix and broker-session gate;
@@ -111,8 +111,8 @@ or an emergency stop. No command expiry, safe retry or firmware deduplication is
 established; do not claim that a connectivity gate prevents all queued replay.
 
 Explicit tilt Stop now clears the local requested target and owner even if cached
-IDLE suppresses wire Stop. This is an unreleased reporting/ownership fix, not
-cancellation of a published command or proof of physical stopping. IDLE still
+IDLE suppresses wire Stop. This reporting/ownership fix is included in `0.4.0.dev1`;
+it does not cancel a published command or prove physical stopping. IDLE still
 sends no `stop`; moving Stop still sends two. Identical open-IDLE status,
 release/fix telemetry and availability-only disconnect/recovery still preserve
 intent until an explicit Stop or existing terminal cleanup. Offline native-service
@@ -150,12 +150,13 @@ No broker port, TLS capability, firmware QoS, heartbeat or offline deadline is i
 | [Actual manual installation](development.md#actual-manual-installation-acceptance-2026-11-07) | Current `d77460b` → reference `ce8d31a` → current exact file trees on HAOS/Core2026.11.0; three actual restarts, public config-flow form/cancel and final config validation. | Versioned releases, native Marketplace/HACS, backwards migrated state or configured hardware. |
 | [Actual synthetic MQTT lifecycle](development.md#actual-synthetic-mqtt-lifecycle-2026-11-07) | Real configured HA/EMQX path in an isolated synthetic namespace; four tilt actions and exact command callback sequence, availability, bounded malformed rejection/recovery, native reload and scoped cleanup. | Independent MQTT receipt/QoS capture, broker-failure stress, physical execution/Stop/holding, settings safety or native release installation. |
 | [Published native prerelease installation](development.md#published-prerelease-and-native-installation-2026-11-07) | Exact `0.4.0.dev0` asset/install bytes, public warning acceptance, prerelease opt-in, native download and repository/version persistence after restart. | New GitHub account setup, legacy HACS, native update/downgrade/reinstall or migrated-state recovery. |
-| [Bounded real-device test](development.md#bounded-real-device-telemetry-acceptance-2026-11-07) | Firmware `3.4.1-15-g3d0f`, all four native tilt actions, actual moving telemetry before one Stop call (two inherited payloads), subsequent IDLE, final closed/zero telemetry and configured restart with stable entry/device/cover identity. | Visual position, calibrated 1%, halt latency/force, mechanical holding, Fix/release, Stop-before-motion, broker-fault/replay coverage, freshness or general firmware/safety acceptance. |
+| [Native version cycle](development.md#published-dev1-and-native-version-cycle-2026-11-07) | Public explicit-version `update.install`: dev0 → dev1 → dev0 → dev1, exact 18-member hashes, three normal Core2026.11.0 restarts, configured identity/settings preservation and final dev1 installed. No motion/Stop/Fix commands. | Schema-migration backward compatibility, interrupted-install/restart-failure automatic rollback, full HA backup restore, legacy HACS or dev1 physical-action/Stop/holding/freshness acceptance. |
+| [Bounded real-device test](development.md#bounded-real-device-telemetry-acceptance-2026-11-07) | `0.4.0.dev0` only, firmware `3.4.1-15-g3d0f`, all four native tilt actions, actual moving telemetry before one Stop call (two inherited payloads), subsequent IDLE, final closed/zero telemetry and configured restart with stable entry/device/cover identity. | Visual position, calibrated 1%, halt latency/force, mechanical holding, Fix/release, Stop-before-motion, broker-fault/replay coverage, freshness or general firmware/safety acceptance. |
 | [Synthetic hosted acceptance](development.md#manual-synthetic-hosted-acceptance) | Exact manual A/B package bytes, matching stopped checkpoint recovery, real isolated broker receipt, stable identity, and retained closed status plus HA closed/zero before fresh fixture publication on restored A. | Native HACS/Marketplace workflows, A reading B-migrated state, general replay/freshness, an independent causal trace of HA updates, firmware or physical Stop/holding. |
 
 Consult the ledger and recorded results for exact versions, source commits and
 observed scope. Historical synthetic/manual exclusions apply to those tests;
-the later prerelease native installation and bounded device telemetry test do not
+the later native version cycle and earlier dev0 bounded device telemetry test do not
 close all release gates. Holding, Stop-before-motion, settings safety, broader
 broker/session failure and replay/freshness remain open. Older HA compatibility
 is outside the testing scope. Further bounded hardware testing is permitted only
