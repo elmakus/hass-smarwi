@@ -2223,3 +2223,143 @@ async def test_discovery_init_suspended_subscription(
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
     await hass.async_block_till_done()
     dispatcher_spy.assert_not_called()
+
+
+async def test_error_code_disabled_by_default(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Register the optional diagnostic without activating it by default."""
+    sensor_id = entity_registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{DEVICE_ID}_error_code"
+    )
+    assert sensor_id is not None
+    registered = entity_registry.async_get(sensor_id)
+    assert registered is not None
+    assert registered.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert registered.entity_category == "diagnostic"
+    assert registered.original_name == "Error code"
+    assert hass.states.get(sensor_id) is None
+
+
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("0", "0"),
+        ("10", "10"),
+        ("0010", "0010"),
+        ("future-code", "future-code"),
+        (None, "unknown"),
+        ("", "unknown"),
+        ("x" * 255, "x" * 255),
+        ("x" * 256, "unknown"),
+    ],
+)
+async def test_error_code_initial_retained_status(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    entity_registry: er.EntityRegistry,
+    code: str | None,
+    expected: str,
+) -> None:
+    """Hydrate an uninterpreted code without a post-attachment status message."""
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: REMOTE_ID})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    for _ in range(2):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+        await hass.async_block_till_done()
+    mqtt_mock.async_publish.reset_mock()
+    payload = STATUS if code is None else f"{STATUS}\ne:{code}"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload, retain=True)
+    await hass.async_block_till_done()
+    sensor_id = entity_registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{DEVICE_ID}_error_code"
+    )
+    assert sensor_id is not None
+    state = hass.states.get(sensor_id)
+    assert state is not None
+    assert state.state == expected
+    for attribute in ("device_class", "state_class", "unit_of_measurement"):
+        assert attribute not in state.attributes
+    mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
+async def test_error_code_updates_and_session_lifecycle(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    broker_connection: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use shared availability and cleanup without deriving faults from s or e."""
+    sensor_id = entity_registry.async_get_entity_id(
+        "sensor", DOMAIN, f"{DEVICE_ID}_error_code"
+    )
+    assert sensor_id is not None
+    registered = entity_registry.async_get(sensor_id)
+    for payload, expected in (
+        (f"{STATUS}\ne:42", "42"),
+        (f"{STATUS}\ne:0", "0"),
+        (f"{STATUS}\ne:", "unknown"),
+        (f"{STATUS}\ne:17", "17"),
+        (STATUS, "unknown"),
+        (f"{STATUS}\ne:31", "31"),
+        (f"{STATUS}\ne:0\nrssi:broken", "31"),
+        (f"{STATUS}\ne:0\nbroken", "31"),
+        (STATUS.replace("s:250", "s:10") + "\ne:0", "0"),
+    ):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+        await hass.async_block_till_done()
+        state = hass.states.get(sensor_id)
+        assert state is not None
+        assert state.state == expected
+    mqtt_mock.async_publish.assert_not_called()
+    broker_connection(False)
+    await hass.async_block_till_done()
+    broker_connection(True)
+    await hass.async_block_till_done()
+    state = hass.states.get(sensor_id)
+    assert state is not None
+    assert state.state == "unavailable"
+    mqtt_mock.async_publish.assert_not_called()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1", retain=True)
+    await hass.async_block_till_done()
+    state = hass.states.get(sensor_id)
+    assert state is not None
+    assert state.state == "0"  # Last known, not a fresh device report.
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", "lcfa", 2, False, message_expiry_interval=None
+    )
+    old_device = smarwi_entry.runtime_data[DEVICE_ID]
+    assert await hass.config_entries.async_unload(smarwi_entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(smarwi_entry.entry_id)
+    for topic, payload in (
+        ("online", "1"),
+        ("status", f"{STATUS}\ne:99"),
+        ("online", "1"),
+    ):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{topic}", payload)
+        await hass.async_block_till_done()
+    assert entity_registry.async_get(sensor_id) is registered
+    assert smarwi_entry.runtime_data[DEVICE_ID] is not old_device
+    state = hass.states.get(sensor_id)
+    assert state is not None
+    assert state.state == "99"
+    assert await hass.config_entries.async_unload(smarwi_entry.entry_id)
+    await hass.async_block_till_done()
+    mqtt_mock.async_publish.reset_mock()
+    with monkeypatch.context() as patch:
+        writes = Mock()
+        patch.setattr(Entity, "async_write_ha_state", writes)
+        async_dispatcher_send(hass, old_device.signal_update, set(SmarwiDeviceProp))
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", f"{STATUS}\ne:7")
+        await hass.async_block_till_done()
+        writes.assert_not_called()
+    mqtt_mock.async_publish.assert_not_called()

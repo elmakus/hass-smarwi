@@ -7,7 +7,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorEntityDescription,
 )
-from homeassistant.const import SIGNAL_STRENGTH_DECIBELS, EntityCategory
+from homeassistant.const import MAX_LENGTH_STATE_STATE, SIGNAL_STRENGTH_DECIBELS, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -29,7 +29,10 @@ async def async_setup_entry(
         if entry_id != entry.entry_id:
             return  # not for us
         assert devices[device_id] is not None
-        async_add_entities([SmarwiRssiSensor(devices[device_id])])
+        async_add_entities([
+            SmarwiRssiSensor(devices[device_id]),
+            SmarwiErrorCodeSensor(devices[device_id]),
+        ])
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_DISCOVERY_NEW, async_discover_device)
@@ -51,4 +54,24 @@ class SmarwiRssiSensor(SmarwiEntity, SensorEntity):
     async def async_handle_update(self, changed_props: set[SmarwiDeviceProp]) -> None:
         if SmarwiDeviceProp.RSSI in changed_props:
             self._attr_native_value = self.device.rssi
+            self.async_write_ha_state()
+
+
+class SmarwiErrorCodeSensor(SmarwiEntity, SensorEntity):
+    """Report the raw firmware error code, not an inferred mechanical fault."""
+
+    entity_description = SensorEntityDescription(
+        key="error_code",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    )
+
+    @override
+    async def async_handle_update(self, changed_props: set[SmarwiDeviceProp]) -> None:
+        if SmarwiDeviceProp.ERROR_CODE in changed_props:
+            value = self.device.error_code
+            # Unspecified firmware values must still fit HA's state boundary.
+            self._attr_native_value = (
+                value if value and len(value) <= MAX_LENGTH_STATE_STATE else None
+            )
             self.async_write_ha_state()
