@@ -6,7 +6,7 @@ See the [development MQTT protocol and safety boundaries](protocol.md) for evide
 
 This is an independently maintained, MQTT-only fork of `jirutka/hass-smarwi`, based on upstream v0.3.5 (`6a528f35a695bfb5b70e5fe22eb113a163ef7999`). Parser, state-reporting, lifecycle and configuration fixes are independent topics. The [upstream ledger](upstream.md) records their fork PRs, exact scope and publication status. Historical baseline counts below are not current totals.
 
-The source version is `0.4.0.dev0`, not a published or hardware-tested release. The development target is the latest stable Home Assistant only; older versions are outside the testing scope. On 2026-11-07, the [official latest release](https://github.com/home-assistant/core/releases/tag/2026.11.0) is `2026.11.0`, matching the existing runtime, official fixtures and strict-type-check baseline. `hacs.json` now declares that tested development floor instead of the inherited, previously removed untested `2024.1.0` value. This is not a firmware matrix or completed native installation/physical acceptance.
+The source version `0.4.0.dev0` is now a published experimental prerelease with bounded native installation and real-device telemetry acceptance recorded below. The development target is the latest stable Home Assistant only; older versions are outside the testing scope. On 2026-11-07, the [official latest release](https://github.com/home-assistant/core/releases/tag/2026.11.0) is `2026.11.0`, matching the existing runtime, official fixtures and strict-type-check baseline. `hacs.json` now declares that tested development floor instead of the inherited, previously removed untested `2024.1.0` value. This is not a firmware matrix or complete installation/update/physical-safety acceptance.
 
 The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. Standard cover controls, standard-action aliases, HTTP control/polling/fallback, dashboard dependencies, and additional actuator entities are outside scope.
 
@@ -74,6 +74,65 @@ does not test the legacy HACS installer, interrupted restart/downgrade, complete
 adversarial-ZIP security, firmware or physical behavior. Full native distribution
 acceptance remains a release gate; historical hosted results are unchanged.
 
+## Published prerelease and native installation (2026-11-07)
+
+Published [GitHub prerelease `0.4.0.dev0`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev0)
+points to exact source `c6017d43e37e5e00eef1e01bb0fff293ab9d942d`.
+Its `smarwi.zip` is **82,518 bytes**, SHA256
+`2374b0ab9194c3fa18e42e074b9a2c5ce0fa4118bce12c9b0eeb05746168ac34`;
+all 18 members match source, including the unchanged MIT license. Exact-source
+verification recorded 247 tests/98 subtests, five inherited warnings, eleven
+package tests, Ruff and pinned strict typing with zero errors/warnings/notes;
+all six protected source checks passed. These are source checks, not safety certification.
+
+On the authorized HAOS/Core `2026.11.0` instance, the actual English custom-integration
+warning was read and accepted through the normal public flow. The existing GitHub
+connection was reused, the correct fork was registered, and repository prerelease
+opt-in was enabled through the public WebSocket API. Native MCP download explicitly
+selected `0.4.0.dev0` and succeeded. The original manual tree was backed up; all
+18 installed files were verified. An actual restart confirmed installed-version
+and repository persistence. Upstream was not installed alongside the fork.
+
+This closes this prerelease's native download/install/restart path, not new GitHub
+account setup, legacy HACS, native update/downgrade/reinstall or migrated-state
+recovery. The earlier offline/manual/synthetic records below remain historical
+evidence with their original scope; their exclusions describe those tests, not
+an absence of this later installation.
+
+## Bounded real-device telemetry acceptance (2026-11-07)
+
+A separately authorized test used that installed prerelease, the existing EMQX
+broker, firmware `3.4.1-15-g3d0f`, one native user config entry and one `WINDOW`
+cover with features `240`. All four native tilt actions were exercised:
+
+| Native action | Broker callback and real device telemetry |
+| --- | --- |
+| Close tilt from initial open/IDLE | `close`; states `220`, `230`, `250`, then `pos:c` and HA tilt zero. |
+| Set tilt position to 1 | `open;1`; states `200`, `210`, `250`, then `pos:o` and HA tilt unknown. |
+| Open tilt, then Stop after a moving condition was observed | `open;100`; state `212` (`REOPEN_START`). One Stop service call produced the inherited **two** `stop` payloads, followed by `250` (`IDLE`). |
+| Final close tilt | `close`; states `220`, `230`, `250`, then closed/tilt zero. |
+
+All captured statuses had `e:0`, `fix:1`, `ro:0`; these raw values are not a
+fault-code or holding guarantee. Evidence is HA broker callbacks paired with
+real device telemetry, not visual observation, independent receipt/QoS capture,
+calibrated 1% accuracy, measured halt latency/force, mechanical holding or general
+firmware compatibility/safety certification. No explicit Fix/release, calibration,
+firmware or mechanical setting change, broker-fault test or old-HA mutation occurred.
+No production code changed. The physical entry remains configured. A second actual
+restart, now with that entry configured, preserved the same entry/device/cover
+unique ID and fork version/repository metadata, with closed/zero, IDLE, fixation
+on and tamper off reported afterward. All 40 baseline entries remained alongside
+only the owned entry (41 total); upstream remained uninstalled. Calibrated distance,
+error code and RSSI remained integration-disabled. The scoped structured SMARWI log
+query returned zero entries, not a universal clean-HA claim. This bounded restart
+and identity result does not prove telemetry freshness.
+
+Stop-before-motion, unchanged-idle/release/disconnect intent handling, holding,
+broader replay/failure and settings safety remain open. Future hardware tests need
+fresh, specific operator readiness and authorization, physical safety controls and
+one controller only; no automatic probes or blind retries. Do not publish another
+release merely to increase coverage.
+
 ## Actual manual installation acceptance (2026-11-07)
 
 An operator-authorized Home Assistant OS installation on Core `2026.11.0` passed
@@ -99,8 +158,8 @@ This closes manual file installation, backward file replacement and return to th
 current candidate with restart/import/config-flow smoke on that instance. It is
 not a versioned release upgrade/downgrade, migrated-state compatibility or native
 Marketplace/HACS acceptance. The repository requires a published `smarwi.zip`
-asset for its native release path; none was published to make this test pass.
-No real window was configured, controlled or used as a health probe.
+asset for its native release path; none was published to make that manual test pass.
+No real window was configured, controlled or used as a health probe in that test.
 
 ## Actual synthetic MQTT lifecycle (2026-11-07)
 
@@ -170,9 +229,9 @@ check, dependency, automatic updater or new version-test framework is added.
 ## Roadmap assessment (2026-11-07)
 
 The next release work remains reliability and compatibility, not a larger actuator
-feature list. Native distribution install/update/recovery, current-stable HA
-validation, broader broker/session behavior and supervised physical acceptance
-remain gates. Older HA compatibility is not a release requirement.
+feature list. The prerelease native install and bounded device tests above do not
+close native update/recovery, broader broker/session behavior, holding or full
+physical-safety acceptance. Older HA compatibility is not a release requirement.
 The completed historical hosted milestone is not repeated or extended by this topic.
 
 | Candidate | Decision and evidence boundary |
@@ -493,12 +552,15 @@ P3b's original results are offline evidence, not upstream acceptance or a firmwa
 
 ## Before any fork release
 
+The experimental prerelease above is published; this checklist still governs further
+release acceptance and is not a claim that every gate was closed before publication.
+
 1. Run the existing HA regression harness and strict checker on the latest stable HA only. Keep the tested baseline, matching official fixtures and HACS floor aligned; record exact dependencies and Python versions. No older-HA matrix is required.
 2. Assert the exact tilt-only feature mask, native tilt-service payloads, and tilt-position reporting. Keep observed state separate from inferred percentages.
 3. Resolve parser, cached-state, availability, command-boundary, and inference defects in separate topics. Passing package tests does not close these gates.
 4. Obtain specific authorization for each HA, broker, or hardware test. Use a disposable simulator before reconnect/failure tests on a live device. Never run two controllers against one device.
 5. Verify firmware-specific stop/holding behavior, settings transactions, broker replay boundaries, device recovery, and physical safety controls. No blind retries or movement/Stop/Fix health probes. Do not enable writable calibrated distance without evidence.
-6. Complete native Marketplace/HACS release installation, update and rollback acceptance in an explicitly authorized environment. Manual current/reference/current file replacement with restart and config-flow smoke already passed as recorded above; do not repeat it as an untested gate. Versioned-release and migrated-state behavior remain separate. Record firmware, HA, broker/session settings, test results and limitations without credentials or private traces.
+6. Complete remaining native update/rollback and any legacy HACS acceptance in an explicitly authorized environment. This prerelease's native install/restart passed as recorded above. Manual current/reference/current file replacement with restart and config-flow smoke already passed as recorded above; do not repeat it as an untested gate. Versioned-release and migrated-state behavior remain separate. Record firmware, HA, broker/session settings, test results and limitations without credentials or private traces.
 7. Recheck the current-stable HACS floor, choose the independent fork version, and keep manifest, exact tag, changelog, and ZIP version consistent. Preserve license notices and build our own asset. Do not reuse upstream release assets.
 8. Review the release policy and tooling before enabling publication. Publishing releases is separate from producing an Actions artifact. No tag or release is part of P1a.
 
