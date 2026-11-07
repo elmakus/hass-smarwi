@@ -13,20 +13,16 @@ For an upstream-suitable fix, fetch upstream and branch from the fresh upstream 
 
 ## Current prerelease acceptance (2026-11-07)
 
+- Published experimental [`0.4.0.dev2`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev2), exact source `395e63d5e4d71c84725c6d3385b67d3f16402e2e`, after protected [PR #38](https://github.com/elmakus/hass-smarwi/pull/38). All six source-main checks passed; manifest/tag and all 18 ZIP members match source/license. Only installed `__init__.py` (queued-discovery [PR #36](https://github.com/elmakus/hass-smarwi/pull/36)) and `manifest.json` differ from dev1. Published dev0/dev1 tags/assets remain immutable.
+- One explicit-version native `update.install` upgraded dev1 to dev2, with exact 18-file checks before and after one normal Core `2026.11.0` restart. All 41 entry IDs, one loaded SMARWI entry, device metadata, 15 entity-registry records, 12 enabled state/attribute records and nine enabled setting values were preserved; three diagnostics/calibrated-distance entities stayed disabled. Final HA observation: closed/zero/IDLE, features 240, fixation on/tamper off. Marketplace installed/latest dev2, no pending update or install in progress. Scoped structured SMARWI logs were empty, raw scope showed only standard loader warnings. An integration-tree baseline copy was preserved, not a full HA backup.
+- No movement, Stop, Fix, settings write, broker outage, downgrade, firmware/calibration or mechanical-safety change accompanied the upgrade. No MQTT cancellation mechanism, retry/expiry policy, schema or dependency change was added. This is normal installation/restart/configuration acceptance, not physical Stop/holding, freshness, settings transactions, interrupted recovery or legacy HACS. Earlier physical-action evidence remains dev0 only. See [dev2 details](development.md#published-dev2-and-native-upgrade-2026-11-07).
+
+## Historical dev1 native version cycle
+
 - Published experimental [`0.4.0.dev1`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev1), exact source `c4fe71f7e04c1c4842b088b77d1c18372efc1e04`, after protected version-candidate [PR #34](https://github.com/elmakus/hass-smarwi/pull/34). All six source-main checks across four workflows passed. Manifest/tag match; all 18 ZIP members match source/license. Only `cover.py` (local-intent [PR #33](https://github.com/elmakus/hass-smarwi/pull/33)) and `manifest.json` differ from immutable dev0 `c6017d43e37e5e00eef1e01bb0fff293ab9d942d`. Asset size/hash and candidate checks are in the [current development record](development.md#published-dev1-and-native-version-cycle-2026-11-07).
 - Actual public native Marketplace `update.install` calls with explicit versions completed dev0 → dev1 → dev0 → dev1. All 18 installed hashes matched before each of three normal Core `2026.11.0` restarts; all 41 baseline entries, configured entry/device/cover identity and nine enabled settings values were preserved. Final dev1 is installed, update entity off/not in progress, closed/zero and IDLE with fixation on/tamper off; disabled diagnostics/calibrated distance remain disabled, upstream uninstalled. Final post-restart hashes match dev1; scoped structured SMARWI logs have zero entries and scoped raw logs only standard loader warnings. The baseline integration-tree backup remains preserved; this was not a full HA backup restore. See the linked record for the corrected A2 `pending-upgrade` verifier assumption.
 - Initial dev0 installation accepted the normal public warning under operator authorization and reused an existing GitHub connection. Earlier authorized firmware `3.4.1-15-g3d0f` tests exercised all four native tilt actions **only on dev0**, not dev1; see the [bounded physical record](development.md#bounded-real-device-telemetry-acceptance-2026-11-07). The physical entry intentionally remains configured on dev1. No motion/Stop/Fix commands, broker outage, firmware, calibration or mechanical-setting changes occurred in the version cycle.
 - This closes versioned file replacement, normal restart, configuration identity and current-configuration compatibility, not schema-migration backward compatibility, interrupted-install/restart-failure automatic rollback, full HA backup restore, legacy HACS, hardware Stop/holding/freshness or mechanical safety. No production change accompanies this documentation record. Historical sections retain their original scope; their “unreleased/no release/device” statements describe those checkpoints, not current publication. Further release and safety gates remain open.
-
-## dev2 candidate
-
-Candidate `0.4.0.dev2` prepares the already-merged queued-discovery ownership guard
-from [PR #36](https://github.com/elmakus/hass-smarwi/pull/36) for a separate immutable
-prerelease. Only installed `__init__.py` and `manifest.json` differ from published
-dev1. No MQTT cancellation mechanism, retry/expiry policy, command, setting,
-identity, schema or dependency changes accompany the version bump. Existing dev1
-publication/native-cycle evidence above is unchanged; this candidate alone is not
-release, installation or physical-safety acceptance.
 
 ## Topics
 
