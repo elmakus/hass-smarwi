@@ -62,6 +62,23 @@ Each production topic had a tests-first local regression, independent read-only 
 | P4e / `41a974b` | Tests-only pending tilt-service completion across unload/reload and immediate rejected unload. Six paired service/outcome cases; replacement ownership/state, one effective active update and no extra publishes. No reproduced production defect or policy change. | [#22](https://github.com/elmakus/hass-smarwi/pull/22), code `cb7766c` | Downstream characterization; no upstream PR |
 | P4f / `43c22f5` | Native setup retry for false MQTT-client readiness, before resource allocation. Three independently reproduced red cases become green: scheduled recovery, unload/removal cancellation and active-entry preservation. No broker reconnect or command-retry policy. | [#23](https://github.com/elmakus/hass-smarwi/pull/23), code `9d03b9c` | No upstream PR |
 
+### Local delayed MQTT command delivery (2026-11-07)
+
+A separate private loopback experiment on exact source `501aaae`, HA/official
+fixtures `2026.11.0`, native Paho `2.1.0` and real Mosquitto `2.0.21` deliberately
+cut HA's first QoS 2 `open;1` before broker receipt. HA used MQTT 5 with clean-start;
+the simulator used MQTT 3.1.1. Native service return without an exception at
+10.008 seconds preceded replay delivery by 0.030 seconds after reconnect was
+allowed. One QoS 2, nonretained opening command was observed in the bounded window.
+The assertion test including teardown passes; independent source/evidence review
+found no blockers and did not rerun it. See the
+[exact evidence boundary](development.md#local-delayed-mqtt-command-delivery-2026-11-07).
+
+This records native replay, not an added integration retry or a cancellation fix.
+No production, unit-suite, metadata, dependency, workflow, release, deployment,
+real HA/EMQX or physical-device change accompanies this documentation. No general
+QoS-stage, firmware, freshness or safety guarantee follows.
+
 ### Delayed discovery callback ownership (2026-11-07)
 
 Based on `bc2ee279000b8ced0cdb6e682c118bbfe939dd5a`, the discovery callback now

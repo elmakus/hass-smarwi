@@ -109,6 +109,12 @@ fresh device proof, a heartbeat deadline or a read-only freshness handshake.
 QoS/publish success is not execution ACK, physical completion, no-replay protection
 or an emergency stop. No command expiry, safe retry or firmware deduplication is
 established; do not claim that a connectivity gate prevents all queued replay.
+A [local real-broker experiment](development.md#local-delayed-mqtt-command-delivery-2026-11-07)
+confirmed one concrete boundary: after a synthetic pre-broker disconnect, native
+HA's ten-second ACK wait returned without raising, then Paho replay delivered the
+pending QoS 2, nonretained `open;1` after reconnect. This was a loopback simulator,
+not physical SMARWI or EMQX acceptance. A completed service call is not cancellation;
+do not blindly repeat motion commands after a connection failure.
 
 Explicit tilt Stop now clears the local requested target and owner even if cached
 IDLE suppresses wire Stop. This reporting/ownership fix is included in `0.4.0.dev1`;

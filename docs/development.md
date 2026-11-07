@@ -365,6 +365,41 @@ Main independently reproduced ten initial red cases against unchanged production
 
 Native HA 2026.11 public subscribe currently registers without yielding. Deliberately suspended acquisitions characterize defensive robustness, not demonstrated broker timing. The gate does not cancel original handlers already executing after commit or solve every queued discovery/unload race. Native registration failures before returning a handle and removal-callback failures remain unproven. Failed attempts keep an inert drained unload closure until entry teardown. These are software ownership guarantees, not firmware, freshness or physical-safety evidence.
 
+## Local delayed MQTT command delivery (2026-11-07)
+
+A separate loopback experiment exercised exact source `501aaae`, HA/official test
+fixtures `2026.11.0`, real native MQTT/Paho `2.1.0` and Mosquitto `2.0.21`.
+HA used MQTT 5 with native clean-start enabled; the independent simulator used
+MQTT 3.1.1. No Paho publish/ACK, MQTT connection callback or integration service was
+mocked. The fixture supplied config entries and mocked YAML loading; this was not
+a full HA server, authenticated UI or physical-device test. All runtime endpoints
+were loopback-only; no existing HA, EMQX or SMARWI was contacted.
+
+A test-only TCP relay validated and discarded the complete first QoS 2 `open;1`
+PUBLISH, including empty MQTT 5 properties, before broker receipt. It closed that
+connection and rejected reconnects until the native set-tilt service returned.
+HA logged its normal ten-second missing-ACK warning but returned without raising
+at **10.008 seconds**. No opening command had reached the simulator. Enabling
+reconnect then delivered the same pending `open;1`, **0.030 seconds after service
+return**. Exactly one opening command, QoS 2 and nonretained, was observed through
+the additional bounded 0.5-second observation. A second native action while the
+entity was unavailable logged a target warning and added no Paho outgoing message;
+it did not raise a service exception.
+
+The assertion-based experiment and teardown pass, with five inherited dependency
+warnings. Broker/client logs and source inspection attribute late delivery to native
+Paho outgoing-message replay, not an integration-level retry. HA's ACK timeout
+removes its wait, not the Paho message. Service return, non-retain, availability
+gating and local intent cleanup must not be interpreted as command expiry or
+cancellation. Do not blindly repeat a motion command after a connection failure.
+
+This is one synthetic failure before broker receipt, in the same running clients,
+not all QoS handshake stages, a restart, firmware execution or actual EMQX behavior.
+Independent source/evidence review found no blockers and did not rerun the test.
+Only this characterization is recorded: no retry/expiry policy, production code,
+regular unit-suite infrastructure, release, deployment or physical test changes.
+The private experiment is separate from the guarded, network-blocked unit suite.
+
 ## Delayed discovery callback ownership (2026-11-07)
 
 An already-dispatched MQTT discovery job can retain an old entry map after native
