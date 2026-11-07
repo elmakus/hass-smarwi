@@ -94,7 +94,14 @@ Only `e` ingestion, its raw cached getter, sensor registration/presentation and
 English translation change. No code table, problem boolean, custom timer, alarm
 engine, motion/availability policy or settings write is introduced. The full local
 suite and existing production-scope strict checker pass; this is not a complete
-quality-tier, supported-version or release claim. Four changed Python/translation\npaths have clean active primary-server diagnostics; this is not an all-server\ncleanliness claim. The inspection-only ZIP contains 18 unique members matching\ncurrent source and the unchanged MIT license; no installer, release or deployment\nwas exercised. Independent source and protocol reviewers found no blockers;\nneither executed the tests. The Bronze checklist still has unverified coverage\nand branding items, field-description gaps and an unresolved connection-validation\nexemption; this diagnostic does not claim or implement full-tier compliance.
+quality-tier, supported-version or release claim. Four changed Python/translation
+paths have clean active primary-server diagnostics; this is not an all-server
+cleanliness claim. The inspection-only ZIP contains 18 unique members matching
+current source and the unchanged MIT license; no installer, release or deployment
+was exercised. Independent source and protocol reviewers found no blockers;
+neither executed the tests. The Bronze checklist still has unverified coverage
+and branding items, field-description gaps and an unresolved connection-validation
+exemption; this diagnostic does not claim or implement full-tier compliance.
 
 ## Discovery initialization recovery (P4d)
 

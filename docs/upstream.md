@@ -57,7 +57,8 @@ Each production topic had a tests-first local regression, independent read-only 
 
 ### Raw error-code diagnostic (2026-11-07)
 
-Based on `ce8d31a`, code `f8f9459` adds only the documented `e` field, raw getter,
+[Fork PR #28](https://github.com/elmakus/hass-smarwi/pull/28), based on `ce8d31a`,
+code `f8f9459` adds only the documented `e` field, raw getter,
 optional diagnostic sensor and English name. Ten new guarded HA/MQTT cases were red
 before implementation (missing entity) and pass after it. No fault-code meanings,
 problem boolean, movement, Stop/Fix, settings or availability change is inferred.
