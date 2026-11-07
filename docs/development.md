@@ -27,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-07)
 
-The combined source checkpoint passes **241 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is the declared development HA floor, not a firmware matrix or completed release acceptance.
+The combined source checkpoint passes **246 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is the declared development HA floor, not a firmware matrix or completed release acceptance.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -44,6 +44,35 @@ The eleven package unittests, pinned strict checker (zero errors/warnings), Ruff
 Main independently reran the combined checks after adding the hosted acceptance harness. Two fresh independent reviewers found no blockers in the harness; they inspected source and evidence but did not execute tests. Main's active primary-server diagnostics checked its three Python and two workflow files with zero findings and no inconclusive outcomes. Auxiliary all-server findings and earlier inconclusive results remain separate, not a universal clean-LSP claim. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result covers production modules, not the new scripts or tests. Local checks do not establish the separate authorized hosted-runtime results recorded below.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
+
+## Offline native Marketplace package contract
+
+Five cases in `tests/test_marketplace_package.py` build the current candidate with
+our existing ZIP builder and use the official HA fixture with a temporary config
+directory. Real `MarketplaceManager` and `IntegrationRepository` objects exercise
+`_async_prepare_catalog_install(version, commit=False)` followed by
+`_async_write_content(download)`. Only the manager's download response bytes are
+replaced, with an exact three-URL allowlist and complete request-order assertion.
+Socket connection, datagram, DNS, bind and listen guards block network access and
+server startup. No new dependency or separate installer framework is added.
+
+The native path installs every flat ZIP member with exact bytes on first write
+and replacement; replacement also removes seeded stale files. An invalid written
+domain or version restores the exact old nested tree. An invalid nested ZIP layout
+removes failed first-install output. Every case checks that the native backup
+directory is empty afterward. Negative archives are synthetic altered payloads,
+not releases; old-tree sentinels are not validated installed integrations.
+
+These are passing characterization tests, not a reproduced production defect or
+red-before-fix evidence. Native metadata resolution, destination selection,
+extraction, written-manifest checks and backup/restore remain real. The private
+methods are coupled to the pinned latest-only HA baseline; inspect them when that
+baseline changes. This is not public `async_install_repository`, catalog selection,
+`update.install`, persisted installed-version metadata, post-install cache/import,
+UI, real HTTP/GitHub downloads, account or published-release acceptance. It also
+does not test the legacy HACS installer, interrupted restart/downgrade, complete
+adversarial-ZIP security, firmware or physical behavior. Full native distribution
+acceptance remains a release gate; historical hosted results are unchanged.
 
 ## Current-stable Home Assistant policy
 
