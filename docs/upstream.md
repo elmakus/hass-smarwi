@@ -13,10 +13,10 @@ For an upstream-suitable fix, fetch upstream and branch from the fresh upstream 
 
 ## Current prerelease acceptance (2026-11-07)
 
-- Published experimental [`0.4.0.dev0`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev0), exact source `c6017d43e37e5e00eef1e01bb0fff293ab9d942d`; `smarwi.zip` has 18 source/license-matching members. Asset size/hash and exact-source checks are in the [development record](development.md#published-prerelease-and-native-installation-2026-11-07).
-- The normal public warning was accepted under the operator's installation authorization; native Marketplace reused an existing GitHub connection, registered this fork with prerelease opt-in and downloaded the explicit version. All installed bytes and repository/version persistence after an actual restart passed; the original manual tree was backed up. Upstream was not installed alongside it. Legacy HACS and native update/downgrade/reinstall remain untested.
-- One specifically authorized real device on firmware `3.4.1-15-g3d0f` and existing EMQX exercised all four native tilt actions. Broker callbacks and device telemetry recorded close, `open;1`, `open;100`, a moving condition followed by one Stop call producing two inherited `stop` payloads and IDLE, then final closed/zero. The physical entry remains configured; a second actual restart preserved entry/device/cover identity, closed/zero telemetry and fork metadata, with all baseline entries preserved and upstream uninstalled. This is not visual or calibrated-position evidence, measured halt/holding, Fix/release, freshness, broader broker/failure coverage or safety certification. See the [bounded physical record](development.md#bounded-real-device-telemetry-acceptance-2026-11-07).
-- No production change accompanies this record. Historical sections below retain their original test/publication scope; their “no release/device” statements do not describe this later acceptance. Further release and safety gates remain open.
+- Published experimental [`0.4.0.dev1`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev1), exact source `c4fe71f7e04c1c4842b088b77d1c18372efc1e04`, after protected version-candidate [PR #34](https://github.com/elmakus/hass-smarwi/pull/34). All six source-main checks across four workflows passed. Manifest/tag match; all 18 ZIP members match source/license. Only `cover.py` (local-intent [PR #33](https://github.com/elmakus/hass-smarwi/pull/33)) and `manifest.json` differ from immutable dev0 `c6017d43e37e5e00eef1e01bb0fff293ab9d942d`. Asset size/hash and candidate checks are in the [current development record](development.md#published-dev1-and-native-version-cycle-2026-11-07).
+- Actual public native Marketplace `update.install` calls with explicit versions completed dev0 → dev1 → dev0 → dev1. All 18 installed hashes matched before each of three normal Core `2026.11.0` restarts; all 41 baseline entries, configured entry/device/cover identity and nine enabled settings values were preserved. Final dev1 is installed, update entity off/not in progress, closed/zero and IDLE with fixation on/tamper off; disabled diagnostics/calibrated distance remain disabled, upstream uninstalled. Final post-restart hashes match dev1; scoped structured SMARWI logs have zero entries and scoped raw logs only standard loader warnings. The baseline integration-tree backup remains preserved; this was not a full HA backup restore. See the linked record for the corrected A2 `pending-upgrade` verifier assumption.
+- Initial dev0 installation accepted the normal public warning under operator authorization and reused an existing GitHub connection. Earlier authorized firmware `3.4.1-15-g3d0f` tests exercised all four native tilt actions **only on dev0**, not dev1; see the [bounded physical record](development.md#bounded-real-device-telemetry-acceptance-2026-11-07). The physical entry intentionally remains configured on dev1. No motion/Stop/Fix commands, broker outage, firmware, calibration or mechanical-setting changes occurred in the version cycle.
+- This closes versioned file replacement, normal restart, configuration identity and current-configuration compatibility, not schema-migration backward compatibility, interrupted-install/restart-failure automatic rollback, full HA backup restore, legacy HACS, hardware Stop/holding/freshness or mechanical safety. No production change accompanies this documentation record. Historical sections retain their original scope; their “unreleased/no release/device” statements describe those checkpoints, not current publication. Further release and safety gates remain open.
 
 ## Topics
 
@@ -62,7 +62,7 @@ Each production topic had a tests-first local regression, independent read-only 
 | P4e / `41a974b` | Tests-only pending tilt-service completion across unload/reload and immediate rejected unload. Six paired service/outcome cases; replacement ownership/state, one effective active update and no extra publishes. No reproduced production defect or policy change. | [#22](https://github.com/elmakus/hass-smarwi/pull/22), code `cb7766c` | Downstream characterization; no upstream PR |
 | P4f / `43c22f5` | Native setup retry for false MQTT-client readiness, before resource allocation. Three independently reproduced red cases become green: scheduled recovery, unload/removal cancellation and active-entry preservation. No broker reconnect or command-retry policy. | [#23](https://github.com/elmakus/hass-smarwi/pull/23), code `9d03b9c` | No upstream PR |
 
-### Unreleased idle-Stop local-intent cleanup (2026-11-07)
+### Idle-Stop local-intent cleanup: original unreleased checkpoint (2026-11-07)
 
 Based on `806c19b272ec19b189dc3b5a42a63f83fd121249`, this changes only
 local requested-target/owner cleanup before the cached-IDLE Stop guard. Three
@@ -77,8 +77,10 @@ The earlier direct idle-Stop-preserves-owner characterization is intentionally
 updated; unchanged-status/release/availability policy remains tested. No physical
 command decision, observed movement, raw telemetry or public percentage changes.
 Early physical Stop, retraction, freshness and general direction inference remain
-unproven. No live system, release, deployment or upstream PR accompanies this topic;
-the [local-intent record](development.md#local-intent-after-stop-with-cached-idle-2026-11-07)
+unproven. At this original checkpoint no live system, release, deployment or upstream
+PR accompanied the topic. It subsequently merged as [fork PR #33](https://github.com/elmakus/hass-smarwi/pull/33)
+and is included in published dev1; no upstream PR is claimed.
+The [local-intent record](development.md#local-intent-after-stop-with-cached-idle-2026-11-07)
 separates it from the immutable published `0.4.0.dev0` source `c6017d4`.
 
 ### Native Marketplace package contract (2026-11-07)
@@ -212,7 +214,7 @@ Code commit `641f6b4` passed [Tilt contract](https://github.com/elmakus/hass-sma
 ## Intentional P1a divergence
 
 - Fork owner, support, documentation, HACS custom-repository links, and default branch point to elmakus rather than upstream. Existing copyright notices remain intact.
-- Source version `0.4.0.dev0` originally identified an unreleased fork baseline and now identifies the experimental prerelease above. It is not upstream v0.3.5 or a tested compatibility promise.
+- Source version `0.4.0.dev0` originally identified an unreleased fork baseline and now identifies the immutable earlier experimental prerelease; current `0.4.0.dev1` includes the local-intent fix. It is not upstream v0.3.5 or a tested compatibility promise.
 - P1a removed the inherited, untested HACS minimum. The current-stable policy now declares tested development floor `2026.11.0`, aligned with the runtime, strict checker and official fixtures. Older HA compatibility is outside scope; the floor does not establish native installer or physical acceptance.
 - ZIPs contain flat integration files and the unchanged root license. The builder checks exact version/asset agreement instead of rewriting a manifest from a tag.
 - The package workflow produces inspection-only Actions artifacts. Automatic upload on a published GitHub release is removed until release gates pass. Workflow action references are pinned to inspected commit SHAs, repository permissions are read-only, and checkout credentials are not persisted.

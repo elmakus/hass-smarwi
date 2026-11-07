@@ -6,7 +6,7 @@ See the [development MQTT protocol and safety boundaries](protocol.md) for evide
 
 This is an independently maintained, MQTT-only fork of `jirutka/hass-smarwi`, based on upstream v0.3.5 (`6a528f35a695bfb5b70e5fe22eb113a163ef7999`). Parser, state-reporting, lifecycle and configuration fixes are independent topics. The [upstream ledger](upstream.md) records their fork PRs, exact scope and publication status. Historical baseline counts below are not current totals.
 
-The source version is `0.4.0.dev1`, a release candidate containing the merged idle-Stop local-intent fix. The published experimental `0.4.0.dev0` remains immutable at `c6017d4`, with bounded native installation and real-device telemetry acceptance recorded below. Publication and native version-transition results for `0.4.0.dev1` are not yet claimed. The development target is the latest stable Home Assistant only; older versions are outside the testing scope. On 2026-11-07, the [official latest release](https://github.com/home-assistant/core/releases/tag/2026.11.0) is `2026.11.0`, matching the existing runtime, official fixtures and strict-type-check baseline. `hacs.json` now declares that tested development floor instead of the inherited, previously removed untested `2024.1.0` value. This is not a firmware matrix or complete installation/update/physical-safety acceptance.
+The published experimental source version is `0.4.0.dev1` at `c4fe71f7e04c1c4842b088b77d1c18372efc1e04`, including the merged idle-Stop local-intent fix. Its completed native version cycle is recorded below. The published `0.4.0.dev0` remains immutable at `c6017d4`; earlier real-device tilt-action evidence applies only to that version and was not repeated on `0.4.0.dev1`. The development target is the latest stable Home Assistant only; older versions are outside the testing scope. On 2026-11-07, the [official latest release](https://github.com/home-assistant/core/releases/tag/2026.11.0) is `2026.11.0`, matching the existing runtime, official fixtures and strict-type-check baseline. `hacs.json` now declares that tested development floor instead of the inherited, previously removed untested `2024.1.0` value. This is not a firmware matrix or complete installation/update/physical-safety acceptance.
 
 The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. Standard cover controls, standard-action aliases, HTTP control/polling/fallback, dashboard dependencies, and additional actuator entities are outside scope.
 
@@ -48,7 +48,7 @@ A development ZIP was also built without overwriting an existing output: all 18 
 
 ## Local intent after Stop with cached IDLE (2026-11-07)
 
-This unreleased source change clears only the requested target and its owner
+This change, now included in `0.4.0.dev1`, clears only the requested target and its owner
 before the existing IDLE guard. A completed native request followed by Stop while
 the cached state was still IDLE previously left its direction override installed.
 Later injected motion telemetry could therefore report HA opening for the existing
@@ -71,7 +71,8 @@ online replay. These boundaries still preserve local intent until explicit Stop;
 recovery adds only the inherited `lcfa` read, not an automatic motion retry.
 This is documented existing policy, not new safety or freshness behavior. Tests use
 official HA fixtures, mocked Paho and socket/DNS guards; no live system, real
-broker outage, window movement, release asset or deployment accompanies this change.
+broker outage or window movement accompanied the original regression checkpoint;
+its release and deployment are recorded separately below.
 The published `0.4.0.dev0` remains the exact earlier `c6017d4` snapshot.
 
 ## Offline native Marketplace package contract
@@ -103,6 +104,48 @@ does not test the legacy HACS installer, interrupted restart/downgrade, complete
 adversarial-ZIP security, firmware or physical behavior. Full native distribution
 acceptance remains a release gate; historical hosted results are unchanged.
 
+## Published dev1 and native version cycle (2026-11-07)
+
+Published [experimental `0.4.0.dev1`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev1)
+points to exact source `c4fe71f7e04c1c4842b088b77d1c18372efc1e04`, with matching
+manifest and tag. Its `smarwi.zip` is **82,532 bytes**, SHA256
+`39dd2e99ff4f2e04f4454222ce3b6bcb5bc74352e03eebdcf9e16ac3dc4b49bc`;
+all 18 members match source, including the unchanged MIT license. Only `cover.py`
+(the [PR #33](https://github.com/elmakus/hass-smarwi/pull/33) local-intent fix)
+and `manifest.json` differ from immutable `0.4.0.dev0`. The version candidate
+[PR #34](https://github.com/elmakus/hass-smarwi/pull/34) merged after protected
+checks; all six source-main checks across four workflows passed. Candidate
+verification passed 256 tests/101 subtests with five inherited warnings, Ruff and
+strict production typing with zero errors. This remains a prerelease, not a
+stable-release or mechanical-safety claim.
+
+The actual public native Marketplace `update.install` service, targeting the
+observed repository update entity with an explicit `version` each time, completed
+**A (`0.4.0.dev0`) → B1 (`0.4.0.dev1`) → A2 (`0.4.0.dev0`) → B2 (`0.4.0.dev1`)**.
+No manual extraction or storage edits were used. All 18 installed member hashes
+matched the expected release before each of the three actual HA restarts; each
+returned Core `2026.11.0` to `RUNNING`. Every stage preserved the configured entry
+as `LOADED`, all 41 baseline entry IDs, device/cover unique identity, `WINDOW` and
+features `240`, closed/zero and IDLE, fixation on and tamper off, all nine enabled
+settings values, and the correct repository installed version. Upstream remained
+uninstalled. Calibrated distance, error code and RSSI remained integration-disabled.
+
+A2 correctly advertised `pending-upgrade` with dev1 available; the initial verifier's
+incorrect requirement for `installed` was corrected without changing HA. Final B2
+reported `installed`, update entity off and `in_progress: false`; all 18 final
+post-restart hashes matched dev1. The scoped structured SMARWI log query returned
+zero entries; scoped raw logs showed only standard custom-integration loader
+warnings, not a universal clean-HA claim. The baseline integration-tree backup was
+preserved. The physical entry intentionally remains configured on dev1.
+
+No motion, Stop or Fix commands were issued in this cycle; no broker outage,
+firmware, calibration or mechanical-setting change occurred. The earlier four-action
+physical test below remains exclusively dev0 evidence on firmware `3.4.1-15-g3d0f`.
+This cycle verifies versioned file replacement, normal restart, configuration
+identity and current-configuration compatibility, **not** schema-migration backward
+compatibility, automatic rollback after interrupted installation/restart failure,
+full HA backup restore, hardware Stop/holding/freshness or legacy HACS.
+
 ## Published prerelease and native installation (2026-11-07)
 
 Published [GitHub prerelease `0.4.0.dev0`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev0)
@@ -130,7 +173,7 @@ an absence of this later installation.
 
 ## Bounded real-device telemetry acceptance (2026-11-07)
 
-A separately authorized test used that installed prerelease, the existing EMQX
+A separately authorized test used installed `0.4.0.dev0` (not dev1), the existing EMQX
 broker, firmware `3.4.1-15-g3d0f`, one native user config entry and one `WINDOW`
 cover with features `240`. All four native tilt actions were exercised:
 
@@ -258,8 +301,8 @@ check, dependency, automatic updater or new version-test framework is added.
 ## Roadmap assessment (2026-11-07)
 
 The next release work remains reliability and compatibility, not a larger actuator
-feature list. The prerelease native install and bounded device tests above do not
-close native update/recovery, broader broker/session behavior, holding or full
+feature list. The native version cycle and earlier bounded dev0 device tests above do not
+close interrupted-install/restart recovery, broader broker/session behavior, holding or full
 physical-safety acceptance. Older HA compatibility is not a release requirement.
 The completed historical hosted milestone is not repeated or extended by this topic.
 
@@ -493,7 +536,7 @@ Run these commands from the repository root. Python 3.13 and Git are sufficient;
 
 ```sh
 python3 -m unittest discover -s tests -p test_package.py -v
-python3 scripts/build_release.py --tag 0.4.0.dev0
+python3 scripts/build_release.py --tag 0.4.0.dev1
 ```
 
 The builder creates `dist/smarwi.zip`, with a flat integration root and the original root `LICENSE`. It uses tracked integration source, translations, and PNG brand assets. It rejects unexpected tracked files, symlinks, missing required assets, mismatched tags, and mismatched HACS filenames. It ignores untracked local files and never packages repository metadata, parent workspace files, or the whole checkout. New integration files must be tracked before packaging; adding a new runtime file type requires updating the allowlist and tests.
@@ -581,7 +624,7 @@ P3b's original results are offline evidence, not upstream acceptance or a firmwa
 
 ## Before any fork release
 
-The experimental prerelease above is published; this checklist still governs further
+The experimental prereleases above are published; this checklist still governs further
 release acceptance and is not a claim that every gate was closed before publication.
 
 1. Run the existing HA regression harness and strict checker on the latest stable HA only. Keep the tested baseline, matching official fixtures and HACS floor aligned; record exact dependencies and Python versions. No older-HA matrix is required.
@@ -589,7 +632,7 @@ release acceptance and is not a claim that every gate was closed before publicat
 3. Resolve parser, cached-state, availability, command-boundary, and inference defects in separate topics. Passing package tests does not close these gates.
 4. Obtain specific authorization for each HA, broker, or hardware test. Use a disposable simulator before reconnect/failure tests on a live device. Never run two controllers against one device.
 5. Verify firmware-specific stop/holding behavior, settings transactions, broker replay boundaries, device recovery, and physical safety controls. No blind retries or movement/Stop/Fix health probes. Do not enable writable calibrated distance without evidence.
-6. Complete remaining native update/rollback and any legacy HACS acceptance in an explicitly authorized environment. This prerelease's native install/restart passed as recorded above. Manual current/reference/current file replacement with restart and config-flow smoke already passed as recorded above; do not repeat it as an untested gate. Versioned-release and migrated-state behavior remain separate. Record firmware, HA, broker/session settings, test results and limitations without credentials or private traces.
+6. Complete remaining interrupted-install/restart-failure recovery and any legacy HACS acceptance in an explicitly authorized environment. Native installation and the explicit-version dev0 → dev1 → dev0 → dev1 cycle with normal restarts passed as recorded above. Historical manual current/reference/current file replacement with restart and config-flow smoke also passed; do not repeat these as untested gates. Schema-migration backward compatibility remains separate. Record firmware, HA, broker/session settings, test results and limitations without credentials or private traces.
 7. Recheck the current-stable HACS floor, choose the independent fork version, and keep manifest, exact tag, changelog, and ZIP version consistent. Preserve license notices and build our own asset. Do not reuse upstream release assets.
 8. Review the release policy and tooling before enabling publication. Publishing releases is separate from producing an Actions artifact. No tag or release is part of P1a.
 
