@@ -1,7 +1,8 @@
 # Development MQTT protocol and safety boundaries
 
 This is a development reference, not an actuation recipe or hardware certification.
-Source version remains `0.4.0.dev0`; no tested firmware matrix is established.
+Source version is the `0.4.0.dev1` candidate; published `0.4.0.dev0` remains immutable.
+No tested firmware matrix is established.
 The [development HA baseline](development.md#current-stable-home-assistant-policy)
 targets the latest stable release only, not historical-version compatibility. The fork includes a 1% encoding fix and broker-session gate;
 merged code and passing CI are not complete release acceptance. Consult the
