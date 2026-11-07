@@ -6,26 +6,56 @@ See the [development MQTT protocol and safety boundaries](protocol.md) for evide
 
 This is an independently maintained, MQTT-only fork of `jirutka/hass-smarwi`, based on upstream v0.3.5 (`6a528f35a695bfb5b70e5fe22eb113a163ef7999`). Parser, state-reporting, lifecycle and configuration fixes are independent topics. The [upstream ledger](upstream.md) records their fork PRs, exact scope and publication status. Historical baseline counts below are not current totals.
 
-The published experimental source version is `0.4.0.dev1` at `c4fe71f7e04c1c4842b088b77d1c18372efc1e04`, including the merged idle-Stop local-intent fix. Its completed native version cycle is recorded below. The published `0.4.0.dev0` remains immutable at `c6017d4`; earlier real-device tilt-action evidence applies only to that version and was not repeated on `0.4.0.dev1`. The development target is the latest stable Home Assistant only; older versions are outside the testing scope. On 2026-11-07, the [official latest release](https://github.com/home-assistant/core/releases/tag/2026.11.0) is `2026.11.0`, matching the existing runtime, official fixtures and strict-type-check baseline. `hacs.json` now declares that tested development floor instead of the inherited, previously removed untested `2024.1.0` value. This is not a firmware matrix or complete installation/update/physical-safety acceptance.
+The published experimental source version is `0.4.0.dev2` at `395e63d5e4d71c84725c6d3385b67d3f16402e2e`, including the queued-discovery ownership guard and the earlier idle-Stop local-intent fix. One native dev1-to-dev2 update and normal restart passed as recorded below. Published dev0 `c6017d4` and dev1 `c4fe71f` remain immutable; the earlier native version cycle covered dev0/dev1, and real-device tilt-action evidence applies only to dev0, not dev1 or dev2. The development target is the latest stable Home Assistant only; older versions are outside the testing scope. On 2026-11-07, the [official latest release](https://github.com/home-assistant/core/releases/tag/2026.11.0) is `2026.11.0`, matching the existing runtime, official fixtures and strict-type-check baseline. `hacs.json` now declares that tested development floor instead of the inherited, previously removed untested `2024.1.0` value. This is not a firmware matrix or complete installation/update/physical-safety acceptance.
 
 The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. Standard cover controls, standard-action aliases, HTTP control/polling/fallback, dashboard dependencies, and additional actuator entities are outside scope.
 
-## dev2 release candidate (2026-11-07)
+## Published dev2 and native upgrade (2026-11-07)
 
-The manifest candidate is `0.4.0.dev2`, based on main `16c61ba`. Relative to
-published dev1 `c4fe71f`, only installed `__init__.py` and `manifest.json` change:
-the [PR #36](https://github.com/elmakus/hass-smarwi/pull/36) queued-discovery
-ownership guard and the version. The three-line guard is covered by three native
-HA/MQTT lifecycle cases; two reproduced stale subscriptions before the fix.
+Published [experimental `0.4.0.dev2`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev2)
+points to exact source `395e63d5e4d71c84725c6d3385b67d3f16402e2e`, prepared through
+protected [PR #38](https://github.com/elmakus/hass-smarwi/pull/38). All six required
+checks passed before merge and on source main. Manifest/tag match. `smarwi.zip`
+is **82,589 bytes**, SHA256
+`9d2e614143a7b0acdfe78db8ce774ca34f42d2e15c88da32221ec576923f1768`;
+all 18 members match exact source and the unchanged license. Only installed
+`__init__.py` and `manifest.json` differ from immutable dev1 `c4fe71f`:
+the [PR #36](https://github.com/elmakus/hass-smarwi/pull/36) three-line queued-discovery
+ownership guard and the version. Three native HA/MQTT lifecycle cases cover that
+guard; two reproduced stale subscriptions before the fix. Full candidate checks
+passed 259 tests and 101 subtests, eleven package unittests, Ruff/scoped formatting,
+strict production typing with zero findings, 122-package compatibility and diff
+checks. Five inherited dependency warnings remain. Independent candidate source
+and documentation review found no blockers; the reviewer did not execute tests.
+
+One actual public native Marketplace `update.install` with explicit version
+`0.4.0.dev2` upgraded the existing dev1 installation, followed by **one normal
+Core `2026.11.0` restart**. Every installed member matched the published asset
+both before and after restart. All 41 baseline config-entry IDs, one loaded SMARWI
+entry, device metadata and all 15 entity-registry records were preserved. All
+12 enabled entity-state/attribute records, including nine enabled number-setting
+values, matched the fresh pre-update baseline. The three disabled diagnostics/
+calibrated-distance entities remained disabled. Final observation was closed,
+tilt zero, IDLE, `WINDOW`, four tilt features (240), fixation on and tamper off.
+Marketplace and its update entity reported installed/latest dev2, no pending
+upgrade and no install in progress. Scoped structured SMARWI logs contained no
+entries; scoped raw logs showed only the standard custom-integration loader
+warning. A baseline integration-tree copy remains preserved, not a full HA backup.
+
+No movement, Stop, Fix, broker interruption, settings write, firmware, calibration
+or mechanical-safety change was issued in this upgrade. No downgrade or failure
+injection was performed. This verifies normal installation, restart and current
+configuration/identity preservation, not physical action/holding, freshness,
+settings transactions, interrupted-install recovery, backward schema migration or
+legacy HACS. Earlier physical-action tests remain exclusively dev0 evidence.
 
 The [local delayed-command experiment](#local-delayed-mqtt-command-delivery-2026-11-07)
-is characterization, not a cancellation or replay-policy fix. No command cancellation
-mechanism, automatic retry, expiry, QoS/Stop/Fix/settings change, new entity, schema
-migration or dependency is introduced. Published dev0/dev1 tags and assets stay
-immutable. Candidate preparation is not publication or deployment evidence.
-A later authorized native dev1-to-dev2 update will check exact installed files,
-identity and existing settings after one normal restart, without downgrade,
-movement, interrupted-install testing or settings-transaction experiments.
+is characterization, not a cancellation or replay-policy fix. No MQTT command
+cancellation mechanism, automatic retry, expiry, QoS/Stop/Fix/settings change, new
+entity, schema migration or dependency is introduced. Published dev0/dev1 tags and
+assets stay immutable. Later acceptance-documentation changes are not deployed;
+the installed tree remains exact published dev2. This is an experimental
+prerelease, not a stable release or mechanical-safety certification.
 
 ## Current behavior and evidence boundary
 

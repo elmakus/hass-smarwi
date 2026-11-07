@@ -10,7 +10,7 @@ This independently maintained fork of [jirutka/hass-smarwi][upstream] uses only 
 The top-mounted actuator controls window tilt. Its single `WINDOW` cover exposes only `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. There are no standard cover-action aliases or standard position controls. Use native tilt actions in dashboards and automations.
 
 > [!WARNING]
-> Experimental prerelease: [`0.4.0.dev1`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev1) is available, with a completed native Marketplace upgrade/downgrade/upgrade cycle. Earlier bounded real-device tilt-action tests apply only to `0.4.0.dev0`, not `0.4.0.dev1`. This fork includes software fixes recorded in the upstream ledger. The development baseline is Home Assistant `2026.11.0`, the latest stable release checked on 2026-11-07. Older HA versions are outside the testing scope; general firmware compatibility and full release acceptance remain unvalidated. Live-window testing requires explicit, bounded operator authorization and physical safety controls.
+> Experimental prerelease: [`0.4.0.dev2`](https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev2) is available, with one completed native Marketplace dev1-to-dev2 update and normal restart. The earlier upgrade/downgrade/upgrade cycle covered dev0/dev1. Bounded real-device tilt-action tests apply only to `0.4.0.dev0`, not dev1 or dev2. This fork includes software fixes recorded in the upstream ledger. The development baseline is Home Assistant `2026.11.0`, the latest stable release checked on 2026-11-07. Older HA versions are outside the testing scope; general firmware compatibility and full release acceptance remain unvalidated. Live-window testing requires explicit, bounded operator authorization and physical safety controls.
 >
 > Public tilt percentage is zero only for accepted closed telemetry, including cache; otherwise it is unknown. Requested targets and private motion/direction estimates are not measured feedback. A moving Stop was followed by device IDLE telemetry; halt latency, force, mechanical holding, general broker replay, freshness and settings safety remain unverified. Do not treat network Stop as an emergency-stop guarantee or enable writable calibrated distance. Keep the physical safety controls available.
 
@@ -19,16 +19,16 @@ See [development and release gates](docs/development.md) and the [upstream ledge
 
 ## Installation
 
-The available [experimental prerelease `0.4.0.dev1`][prerelease] targets Home Assistant `2026.11.0`. This fork retains domain `smarwi`; do not install it alongside another repository using that domain. Normal versioned replacement/restart passed for `0.4.0.dev0` → `0.4.0.dev1` → `0.4.0.dev0` → `0.4.0.dev1`; schema-migration compatibility and interrupted-install/restart recovery remain unverified.
+The available [experimental prerelease `0.4.0.dev2`][prerelease] targets Home Assistant `2026.11.0`. This fork retains domain `smarwi`; do not install it alongside another repository using that domain. One normal native dev1-to-dev2 update/restart preserved configuration and identity. The earlier dev0/dev1 cycle remains separate evidence; schema-migration compatibility and interrupted-install/restart recovery remain unverified.
 
 ### Using native Home Assistant Marketplace
 
 1. Read and accept Home Assistant's custom-integration warning only if you accept its risks; use the normal GitHub connection flow if needed.
 1. Add `https://github.com/elmakus/hass-smarwi` as a custom integration repository, not the upstream repository. This fork is not in the default catalog.
-1. Enable prereleases for this repository and explicitly select `0.4.0.dev1`.
+1. Enable prereleases for this repository and explicitly select `0.4.0.dev2`.
 1. Download the integration and restart Home Assistant.
 
-The native path was tested with explicit-version `update.install` calls, exact installed-file verification and three normal restarts preserving the configured entry and repository/version metadata. Initial installation reused an existing GitHub connection; new-account setup was not tested. See [current acceptance](docs/development.md#published-dev1-and-native-version-cycle-2026-11-07) for boundaries.
+The latest native update used explicit-version `update.install`, exact 18-file verification before and after one normal restart, and configuration/entity/settings preservation checks. Earlier dev0/dev1 tests used three restarts. Initial installation reused an existing GitHub connection; new-account setup was not tested. See [current acceptance](docs/development.md#published-dev2-and-native-upgrade-2026-11-07) for boundaries.
 
 ### Using Home Assistant Community Store (HACS)
 
@@ -157,7 +157,7 @@ This project is licensed under the [MIT License](LICENSE). Original copyright an
 
 [upstream]: https://github.com/jirutka/hass-smarwi
 [releases]: https://github.com/elmakus/hass-smarwi/releases
-[prerelease]: https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev1
+[prerelease]: https://github.com/elmakus/hass-smarwi/releases/tag/0.4.0.dev2
 [releases-shield]: https://img.shields.io/github/release/elmakus/hass-smarwi.svg?style=flat-square
 [HACS]: https://hacs.xyz/
 [smarwi-website]: https://vektiva.com/index.php/en/
