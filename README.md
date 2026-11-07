@@ -103,6 +103,7 @@ The integration will create the following entities for each discovered SMARWI de
 | ridge_fix           | switch        |            | Fix or release the ridge. |
 | ridge_inside        | binary_sensor | diagnostic | Shows if the ridge is inside the device (i.e. it’s operational). |
 | rssi                | sensor        | diagnostic | Monitor WiFi signal strength (disabled by default). |
+| error_code          | sensor        | diagnostic | Raw reported `e` value (disabled by default). Missing/empty values are unknown; no fault meanings or healthy-state guarantee are inferred. |
 | calibrated_distance | number        | config     | Inherited writable calibration value, disabled by default. Do not enable: write semantics are unverified and the manufacturer's UI treats it as read-only. |
 | closed_hold_power   | number        | config     | Set closed holding power (finetune setting). |
 | closed_position     | number        | config     | Set window closed position finetune (finetune setting). |

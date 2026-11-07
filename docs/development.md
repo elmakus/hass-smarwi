@@ -25,9 +25,9 @@ The guarded public-interface unit tests use official HA fixtures and mocked Paho
 
 Private motion/direction estimates remain inherited and unverified. The `OPENING` phase cannot simply be equated to physical opening toward every target. Stop-before-motion, unchanged idle telemetry, release/disconnect intent invalidation, settings transactions and physical recovery remain separate gates. Native HA tilt-toggle opens at reported zero and closes when tilt is unknown; removing stale zero can change that default branch. Use explicit native actions when intent matters. No dashboard or standard-action alias compensates for these limits.
 
-## Latest combined local verification (2026-11-06)
+## Latest combined local verification (2026-11-07)
 
-The combined source checkpoint passes **230 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
+The combined source checkpoint passes **240 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is one tested development baseline, not a declared HA minimum or firmware matrix.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -44,6 +44,57 @@ The ten package unittests, pinned strict checker (zero errors/warnings), Ruff, s
 Main independently reran the combined checks after adding the hosted acceptance harness. Two fresh independent reviewers found no blockers in the harness; they inspected source and evidence but did not execute tests. Main's active primary-server diagnostics checked its three Python and two workflow files with zero findings and no inconclusive outcomes. Auxiliary all-server findings and earlier inconclusive results remain separate, not a universal clean-LSP claim. Earlier interpreter-resolution findings and actual test-assertion issues are recorded in the ledger; no diagnostic rule was globally disabled. The explicit-interpreter strict CLI result covers production modules, not the new scripts or tests. Local checks do not establish the separate authorized hosted-runtime results recorded below.
 
 A development ZIP was also built without overwriting an existing output: all 18 members matched current source bytes, including the unchanged MIT license. This checks packaging, not HACS installation or deployment. Fork CI and merge status are recorded per PR in the ledger; local green results alone do not authorize a release.
+
+## Roadmap assessment (2026-11-07)
+
+The next release work remains reliability and compatibility, not a larger actuator
+feature list. Native distribution install/update/recovery, a tested HA range,
+broader broker/session behavior and supervised physical acceptance remain gates.
+The completed historical hosted milestone is not repeated or extended by this topic.
+
+| Candidate | Decision and evidence boundary |
+| --- | --- |
+| Raw `e` error-code reporting | Implemented as a read-only diagnostic sensor, disabled by default. Reuses the existing MQTT snapshot, entity lifecycle and sensor platform; no dependency or additional subscription. Vendor code meanings remain unknown. |
+| Infer unexpected physical movement from `pos`/`s` and missing HA intent | Unsupported as reliable attribution or intrusion detection. Binary position does not capture every open-to-open movement. Other controllers, physical buttons and autonomous plans need no local HA intent. |
+| Vendor unexpected-open/close virtual sensor | Worth investigating further: [firmware 203.3.0](https://vektiva.gitlab.io/vektivadocs/en/changelog/smarwi.html) announces it. Topic, payload, trigger/reset rules, freshness and firmware compatibility are not established. Obtain the wire contract before implementation; physical characterization requires specific supervised authorization. |
+| Plain `open` instead of `open;100` | No command change. [API documentation](https://vektiva.gitlab.io/vektivadocs/en/api/api.html) permits an optional target; [MQTT documentation](https://vektiva.gitlab.io/vektivadocs/en/api/mqtt.html) explicitly illustrates `open;100`. Neither establishes the omitted target default, equivalence or different smoothness/motor profiles. |
+| Read-only calibrated distance | Deferred. [Finetune documentation](https://vektiva.gitlab.io/vektivadocs/en/settings/finetune.html) calls the measured distance read-only. Existing writable `cfdist` and filtered `cvdist` are not proven equivalent. Keep the inherited number disabled; do not invent a replacement mapping. |
+| Unknown public tilt and 1% opening | Completed software behavior: observed closed gives zero; otherwise unknown. A positive 1% request publishes `open;1`. Neither result establishes physical percentage accuracy. |
+| Stop/Fix and state recovery | Software intent-failure ownership and bounded lifecycle recovery are covered. Physical Stop/holding, Stop-before-motion and private direction/idle/disconnect policy remain separate gates; no safety-critical command change. |
+| MQTT availability and reconnect | Bounded connection/session/status gating and native setup retry are covered. Retained online/status remain last-known observations; freshness, arbitrary replay and execution acknowledgement are not established. |
+
+At startup/reload/reconnect, unknown or unavailable becoming open is not evidence
+of a new physical movement. Do not infer transitions across missing, rejected or
+disconnected telemetry, or interpret retained replay as an event. No documented
+heartbeat deadline, trusted event clock or controller correlation closes these gaps.
+
+[Alarmo](https://github.com/nielsfaber/alarmo#sensor-configuration) already combines
+security-related binary sensors and owns arming, delays and actions. Reuse it rather
+than building alarm policy into SMARWI if a trustworthy sensor contract is later
+established. The raw error-code sensor is not an Alarmo window/intrusion input; the
+existing ridge diagnostic is not proof of unexpected movement. An independently
+validated contact sensor is a better source of physical open/closed observations,
+not a source of actor attribution or a security guarantee. No automatic movement,
+Stop or Fix response is added.
+
+### Raw error-code diagnostic verification
+
+Ten guarded public-HA cases failed before implementation because the entity did not
+exist, then passed. They cover disabled-by-default registration and English naming;
+initial retained-marked status hydration without post-attachment telemetry; raw
+zero, leading-zero and unknown text values; missing/empty and HA state-length
+boundaries; update/clear/rejected-message behavior; independence from `s`; native
+broker disconnect/reconnect and retained-online cache recovery; reload identity
+and unload cleanup. Tests use the existing official fixtures, mocked Paho and
+network guards. No listening server, device fault or physical movement was tested.
+The first green attempt exposed a test expectation at the wrong mocked MQTT layer;
+correcting it to the existing native-client call signature left production unchanged.
+
+Only `e` ingestion, its raw cached getter, sensor registration/presentation and
+English translation change. No code table, problem boolean, custom timer, alarm
+engine, motion/availability policy or settings write is introduced. The full local
+suite and existing production-scope strict checker pass; this is not a complete
+quality-tier, supported-version or release claim. Four changed Python/translation\npaths have clean active primary-server diagnostics; this is not an all-server\ncleanliness claim. The inspection-only ZIP contains 18 unique members matching\ncurrent source and the unchanged MIT license; no installer, release or deployment\nwas exercised. Independent source and protocol reviewers found no blockers;\nneither executed the tests. The Bronze checklist still has unverified coverage\nand branding items, field-description gaps and an unresolved connection-validation\nexemption; this diagnostic does not claim or implement full-tier compliance.
 
 ## Discovery initialization recovery (P4d)
 

@@ -75,6 +75,17 @@ these are implementation mappings, not a formal firmware contract.
 Unknown integer state codes map to `UNKNOWN`; inherited error classification/logging
 of UNKNOWN does not establish a physical fault. Sample `ok` is not a documented ACK.
 
+The MQTT page separately defines `e` as "error code" and illustrates `e:0`, without
+a code table, value grammar or explicit zero-value meaning. The optional, disabled
+by default `error_code` diagnostic sensor exposes nonempty values verbatim. Missing,
+empty or values exceeding HA's 255-character state limit report unknown, never a
+truncated code. Raw snapshot storage remains unchanged by this presentation limit.
+Accepted snapshots missing `e` clear the sensor; rejected snapshots preserve it.
+The sensor reuses device availability, including retained last-known data, and does
+not derive faults, severity, motion, Stop/Fix actions or availability from `e`.
+See the [roadmap assessment](development.md#roadmap-assessment-2026-11-07) for the
+separate unexpected-movement and parameterless-opening research decisions.
+
 Fork ingestion ignores empty lines, splits at the first colon and rejects malformed
 records atomically. Present numeric `s`/`rssi`/`ip` conversions and unsigned IP packing
 are validated before committing status. Empty/missing `s` retains UNKNOWN fallback;

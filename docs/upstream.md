@@ -55,6 +55,16 @@ Each production topic had a tests-first local regression, independent read-only 
 | P4e / `41a974b` | Tests-only pending tilt-service completion across unload/reload and immediate rejected unload. Six paired service/outcome cases; replacement ownership/state, one effective active update and no extra publishes. No reproduced production defect or policy change. | [#22](https://github.com/elmakus/hass-smarwi/pull/22), code `cb7766c` | Downstream characterization; no upstream PR |
 | P4f / `43c22f5` | Native setup retry for false MQTT-client readiness, before resource allocation. Three independently reproduced red cases become green: scheduled recovery, unload/removal cancellation and active-entry preservation. No broker reconnect or command-retry policy. | [#23](https://github.com/elmakus/hass-smarwi/pull/23), code `9d03b9c` | No upstream PR |
 
+### Raw error-code diagnostic (2026-11-07)
+
+Based on `ce8d31a`, code `f8f9459` adds only the documented `e` field, raw getter,
+optional diagnostic sensor and English name. Ten new guarded HA/MQTT cases were red
+before implementation (missing entity) and pass after it. No fault-code meanings,
+problem boolean, movement, Stop/Fix, settings or availability change is inferred.
+The [roadmap assessment](development.md#roadmap-assessment-2026-11-07) separates this
+supported diagnostic from unverified firmware features and remaining release gates.
+No upstream PR, release or deployment accompanies this downstream feature.
+
 Combined local checkpoint after P6d integration: **188 passed, 57 passing subtests, no xfails**, five third-party deprecation warnings. Ten package unittests, Ruff lint/scoped formatting, offline installed-dependency check (122 compatible packages) and strict current-HA basedpyright (zero errors/warnings) pass. All 18 development ZIP members match source bytes with the unchanged MIT license. Two independent P6d reviewers found no blockers; main reran the combined suite. The final all-server LSP sweep was inconclusive, not universally clean; explicit-interpreter CLI evidence is confirmed. Counts describe the combined production tree at `017732edb81ca082a6de6eaa06de24464cf583df`, not every historical topic in isolation. An independent local evidence/privacy audit found no actionable issues in the protocol, development notes or ledger; it did not independently execute tests or query GitHub. No live HA/device, HACS install/update, supported minimum or hardware acceptance is implied.
 
 ### P4d combined verification and limits
