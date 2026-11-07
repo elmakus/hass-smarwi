@@ -18,6 +18,16 @@ For an upstream-suitable fix, fetch upstream and branch from the fresh upstream 
 - Initial dev0 installation accepted the normal public warning under operator authorization and reused an existing GitHub connection. Earlier authorized firmware `3.4.1-15-g3d0f` tests exercised all four native tilt actions **only on dev0**, not dev1; see the [bounded physical record](development.md#bounded-real-device-telemetry-acceptance-2026-11-07). The physical entry intentionally remains configured on dev1. No motion/Stop/Fix commands, broker outage, firmware, calibration or mechanical-setting changes occurred in the version cycle.
 - This closes versioned file replacement, normal restart, configuration identity and current-configuration compatibility, not schema-migration backward compatibility, interrupted-install/restart-failure automatic rollback, full HA backup restore, legacy HACS, hardware Stop/holding/freshness or mechanical safety. No production change accompanies this documentation record. Historical sections retain their original scope; their “unreleased/no release/device” statements describe those checkpoints, not current publication. Further release and safety gates remain open.
 
+## dev2 candidate
+
+Candidate `0.4.0.dev2` prepares the already-merged queued-discovery ownership guard
+from [PR #36](https://github.com/elmakus/hass-smarwi/pull/36) for a separate immutable
+prerelease. Only installed `__init__.py` and `manifest.json` differ from published
+dev1. No MQTT cancellation mechanism, retry/expiry policy, command, setting,
+identity, schema or dependency changes accompany the version bump. Existing dev1
+publication/native-cycle evidence above is unchanged; this candidate alone is not
+release, installation or physical-safety acceptance.
+
 ## Topics
 
 | Topic | Base | Tests / evidence | Fork integration | Upstream status |

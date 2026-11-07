@@ -10,6 +10,23 @@ The published experimental source version is `0.4.0.dev1` at `c4fe71f7e04c1c4842
 
 The integration domain remains `smarwi`. One `WINDOW` cover retains exactly `OPEN_TILT`, `CLOSE_TILT`, `SET_TILT_POSITION`, and `STOP_TILT`. Standard cover controls, standard-action aliases, HTTP control/polling/fallback, dashboard dependencies, and additional actuator entities are outside scope.
 
+## dev2 release candidate (2026-11-07)
+
+The manifest candidate is `0.4.0.dev2`, based on main `16c61ba`. Relative to
+published dev1 `c4fe71f`, only installed `__init__.py` and `manifest.json` change:
+the [PR #36](https://github.com/elmakus/hass-smarwi/pull/36) queued-discovery
+ownership guard and the version. The three-line guard is covered by three native
+HA/MQTT lifecycle cases; two reproduced stale subscriptions before the fix.
+
+The [local delayed-command experiment](#local-delayed-mqtt-command-delivery-2026-11-07)
+is characterization, not a cancellation or replay-policy fix. No command cancellation
+mechanism, automatic retry, expiry, QoS/Stop/Fix/settings change, new entity, schema
+migration or dependency is introduced. Published dev0/dev1 tags and assets stay
+immutable. Candidate preparation is not publication or deployment evidence.
+A later authorized native dev1-to-dev2 update will check exact installed files,
+identity and existing settings after one normal restart, without downgrade,
+movement, interrupted-install testing or settings-transaction experiments.
+
 ## Current behavior and evidence boundary
 
 - Validate status numbers before snapshot replacement, entity discovery, registry work or update dispatch. Reject malformed messages atomically; do not invent mandatory complete snapshots, merging, firmware ranges or a state-code allowlist.
