@@ -397,7 +397,9 @@ class SmarwiDevice:
     async def _async_update_device_registry(self) -> None:
         dev_registry = dr.async_get(self._hass)
 
-        if dev := dev_registry.async_get_device(identifiers={(DOMAIN, self.id)}):
+        if dev := dev_registry.async_get_device_by_identifier(
+            (DOMAIN, self.id), self._config_entry.entry_id
+        ):
             LOGGER.debug(f"Updating SMARWI {self.id} in device registry")
             dev_registry.async_update_device(
                 dev.id,

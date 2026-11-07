@@ -206,6 +206,75 @@ async def test_runtime_data_is_entry_owned_before_platform_setup(
     assert set(entries[1].runtime_data) == {"runtime_serial_1"}
 
 
+async def test_status_updates_only_entry_owned_device_registry_metadata(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    device_registry: dr.DeviceRegistry,
+    entity_registry: er.EntityRegistry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Resolve duplicate native identifiers by entry without deprecated lookups."""
+    other_entry = MockConfigEntry(
+        domain=DOMAIN, data={CONF_REMOTE_ID: "offline_other_remote"}
+    )
+    other_entry.add_to_hass(hass)
+    other_device = device_registry.async_get_or_create(
+        config_entry_id=other_entry.entry_id,
+        identifiers={(DOMAIN, DEVICE_ID)},
+        name="Other fixture",
+        configuration_url="http://192.0.2.2",
+        sw_version="other-firmware",
+        serial_number=DEVICE_ID,
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: REMOTE_ID})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    for suffix, payload in (("online", "1"), ("status", STATUS)):
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{suffix}", payload)
+        await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, DEVICE_ID), entry.entry_id
+    )
+    assert device is not None
+    assert device.id != other_device.id
+    cover_id = entity_registry.async_get_entity_id(
+        "cover", DOMAIN, f"{DEVICE_ID}_cover"
+    )
+    assert cover_id is not None
+    cover = entity_registry.async_get(cover_id)
+    assert cover is not None
+    assert cover.config_entry_id == entry.entry_id
+    assert cover.device_id == device.id
+
+    async_fire_mqtt_message(
+        hass,
+        f"{BASE_TOPIC}/status",
+        STATUS.replace("Offline fixture", "Updated fixture")
+        + "\nip:67305985\nfw:updated-firmware",
+    )
+    await hass.async_block_till_done()
+
+    updated_device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, DEVICE_ID), entry.entry_id
+    )
+    assert updated_device is not None
+    assert updated_device.id == device.id
+    assert updated_device.config_entry_id == entry.entry_id
+    assert updated_device.identifiers == {(DOMAIN, DEVICE_ID)}
+    assert updated_device.serial_number == DEVICE_ID
+    assert updated_device.name == "Updated fixture"
+    assert updated_device.configuration_url == "http://1.2.3.4"
+    assert updated_device.sw_version == "updated-firmware"
+    assert device_registry.async_get(other_device.id) == other_device
+    assert entity_registry.async_get(cover_id) == cover
+    assert not any(
+        "calls `device_registry.async_get_device`" in record.getMessage()
+        for record in caplog.records
+    )
+
+
 @pytest.mark.parametrize("finish", ["recover", "unload", "remove"])
 async def test_mqtt_readiness_native_retry(
     hass: HomeAssistant,
