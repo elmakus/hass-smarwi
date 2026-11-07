@@ -27,7 +27,7 @@ Private motion/direction estimates remain inherited and unverified. The `OPENING
 
 ## Latest combined local verification (2026-11-07)
 
-The combined source checkpoint passes **246 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is the declared development HA floor, not a firmware matrix or completed release acceptance.
+The combined source checkpoint passes **247 tests and 98 subtests, with no xfails** on Python `3.14.10`, HA/official `pytest-homeassistant` `2026.11.0` and Paho `2.1.0`. These local counts include 16 dependency-free hosted-harness helper tests; separately executed hosted results are recorded below. Five third-party aiohttp/backoff deprecation warnings remain visible. This is the declared development HA floor, not a firmware matrix or completed release acceptance.
 
 ```sh
 .venv/bin/python -m pytest -q --tb=short --show-capture=no
@@ -73,6 +73,81 @@ UI, real HTTP/GitHub downloads, account or published-release acceptance. It also
 does not test the legacy HACS installer, interrupted restart/downgrade, complete
 adversarial-ZIP security, firmware or physical behavior. Full native distribution
 acceptance remains a release gate; historical hosted results are unchanged.
+
+## Actual manual installation acceptance (2026-11-07)
+
+An operator-authorized Home Assistant OS installation on Core `2026.11.0` passed
+this manual sequence: current candidate `d77460b` → reference `ce8d31a` → current
+candidate again. Both snapshots identify as `0.4.0.dev0`; exact Git-blob/member
+hashes, not version strings, distinguish them. The reference differs in
+`device.py`, `sensor.py` and `translations/en.json`.
+
+All 18 ZIP members, including the unchanged MIT license, matched each exact source
+snapshot before transfer and after installation. Initial installation required an
+absent destination. Each replacement checked the existing tree, staged the next
+package and preserved the previous tree before switching. No other integration
+files or configuration were replaced.
+
+Each of the three installations passed an actual HA restart, returned to
+`RUNNING`, and opened the public SMARWI config-entry flow with its required
+Remote ID field and no form errors. Each form was cancelled without submitting an
+ID. Final config validation passed, current candidate files remained installed,
+and no SMARWI config entry existed. The raw startup log had HA's standard
+custom-integration warning; the final structured system log had no SMARWI errors.
+
+This closes manual file installation, backward file replacement and return to the
+current candidate with restart/import/config-flow smoke on that instance. It is
+not a versioned release upgrade/downgrade, migrated-state compatibility or native
+Marketplace/HACS acceptance. The repository requires a published `smarwi.zip`
+asset for its native release path; none was published to make this test pass.
+No real window was configured, controlled or used as a health probe.
+
+## Actual synthetic MQTT lifecycle (2026-11-07)
+
+A separate operator-authorized test on the same Core `2026.11.0` installation used
+`d77460b`, its existing EMQX broker and one fresh random synthetic Remote ID and
+serial. It created a real SMARWI user config entry and simulated only that device's
+online/status/configuration-response topics. No real controller namespace,
+broker settings, broker restart, account or other config entry was changed.
+
+The real HA state machine showed exactly one WINDOW cover with features `240`,
+closed/tilt zero and open/unknown tilt without standard position. All four native
+tilt actions targeted that verified synthetic cover. Native `mqtt.dump` callbacks
+recorded `open;1`, `open;100`, `close`, `stop`, `stop` in order, plus four inherited
+`lcfa` reads across initial online, offline, recovery and reload. The two Stop
+payloads characterize existing software behavior, not physical stopping.
+
+Synthetic offline/online changed availability and recovered cached state. One
+malformed numeric status preserved state/attributes during a 1.5-second observation;
+subsequent valid open/closed telemetry recovered normally. Native entry reload
+kept the same cover entity ID, restored closed/zero and created no duplicate cover.
+The test then removed its own entry and 12 states, preserving all 40 original
+config entry IDs. A fresh scoped subscription saw no retained test messages before
+a non-retained positive-control probe. No test controller was left configured.
+
+This is real broker/HA integration evidence from the same HA MQTT client's
+callbacks, not an independent client, packet capture, receipt QoS/retain-flag proof,
+execution acknowledgement or physical test. It does not exercise broker failures,
+persistence stress, native release installation or backwards migrated state.
+The deliberate malformed status produced its expected rejection warning. The test
+also exposed the deprecated unscoped device-registry lookup at `device.py`, tracked
+as a separate compatibility fix; the original run is not a clean-warning claim.
+
+## Entry-owned device-registry metadata
+
+The actual synthetic MQTT run exposed HA's deprecation warning for the unscoped
+`DeviceRegistry.async_get_device` lookup. Status-driven metadata updates now use
+`async_get_device_by_identifier((DOMAIN, serial), config_entry_id)`. No identifiers,
+entity identity, metadata fields or control policy change.
+
+A new public HA/MQTT regression uses two native device entries with the same
+identifier under different config entries. It failed against unchanged production
+because telemetry modified the other entry's metadata. With the scoped lookup,
+only the owning device updates; device/entity identity and the other entry remain
+unchanged, with no deprecated-call warning. Parent independently reproduced red
+and reran the full green suite. The strict checker covers production modules;
+active primary-server checks of the two changed Python files are clean. Native
+lookup returns no device rather than falling back to another owner.
 
 ## Current-stable Home Assistant policy
 
@@ -423,7 +498,7 @@ P3b's original results are offline evidence, not upstream acceptance or a firmwa
 3. Resolve parser, cached-state, availability, command-boundary, and inference defects in separate topics. Passing package tests does not close these gates.
 4. Obtain specific authorization for each HA, broker, or hardware test. Use a disposable simulator before reconnect/failure tests on a live device. Never run two controllers against one device.
 5. Verify firmware-specific stop/holding behavior, settings transactions, broker replay boundaries, device recovery, and physical safety controls. No blind retries or movement/Stop/Fix health probes. Do not enable writable calibrated distance without evidence.
-6. Validate installation, update, and rollback with HACS and manual packages in an authorized disposable environment. Record firmware, HA, broker/session settings, test results, and limitations without credentials or private traces.
+6. Complete native Marketplace/HACS release installation, update and rollback acceptance in an explicitly authorized environment. Manual current/reference/current file replacement with restart and config-flow smoke already passed as recorded above; do not repeat it as an untested gate. Versioned-release and migrated-state behavior remain separate. Record firmware, HA, broker/session settings, test results and limitations without credentials or private traces.
 7. Recheck the current-stable HACS floor, choose the independent fork version, and keep manifest, exact tag, changelog, and ZIP version consistent. Preserve license notices and build our own asset. Do not reuse upstream release assets.
 8. Review the release policy and tooling before enabling publication. Publishing releases is separate from producing an Actions artifact. No tag or release is part of P1a.
 

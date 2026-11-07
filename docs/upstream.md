@@ -76,6 +76,55 @@ excludes public installation, persisted version/cache/import, real downloads,
 accounts/releases, legacy HACS, interrupted recovery and physical acceptance.
 Native distribution remains an incomplete release gate.
 
+### Actual manual installation acceptance (2026-11-07)
+
+On an operator-authorized HAOS/Core `2026.11.0` instance, exact candidate
+`d77460b` files were installed, replaced with reference `ce8d31a`, then replaced
+with the current candidate again. Each of the three steps verified all 18 members
+against exact Git blobs, restarted HA and opened/cancelled the public SMARWI user
+flow without entering a Remote ID. Final config validation passed and current
+files remained installed, without a SMARWI config entry or physical controller.
+Previous trees were preserved. The standard custom-integration startup warning is
+not an integration exception; final structured SMARWI error search was empty.
+
+Both snapshots use `0.4.0.dev0`; this proves manual file replacement/import/form
+behavior, not versioned release updates, migrated-state compatibility or native
+Marketplace/HACS. No tag, release asset or account-warning bypass was used. See
+[actual manual installation](development.md#actual-manual-installation-acceptance-2026-11-07)
+for the exact boundary. No production source or test-suite change accompanies this
+acceptance record.
+
+### Actual synthetic MQTT lifecycle (2026-11-07)
+
+Installed `d77460b` passed a separate real HA/EMQX test with one random synthetic
+Remote ID/serial, a real user config entry and native MQTT publish/dump services.
+Exactly one WINDOW/four-tilt-feature cover reported closed/zero and open/unknown.
+Native actions produced ordered `open;1`, `open;100`, `close`, `stop`, `stop`
+callbacks plus four expected `lcfa` reads. Offline/cache recovery, a bounded
+malformed-status preservation/recovery case and native same-entity reload passed.
+Cleanup removed the test entry and 12 states, preserved all 40 original entry IDs
+and left no retained test telemetry at a fresh scoped subscription.
+
+Observations use the same HA client's broker callbacks, not an independent MQTT
+client or physical acknowledgement. The deliberate malformed status warned as
+expected; native HA also warned about the deprecated unscoped registry lookup,
+which requires a separate compatibility fix. No broker failure/settings,
+physical controller, release or native installer was tested. See the
+[actual synthetic MQTT boundary](development.md#actual-synthetic-mqtt-lifecycle-2026-11-07).
+
+### Entry-scoped registry lookup (2026-11-07)
+
+Based on `d77460b`, the production change replaces only the deprecated unscoped
+metadata lookup with native `async_get_device_by_identifier` and the owning config
+entry ID. A public HA/MQTT regression with duplicate native identifiers under two
+entries failed before the change because another entry's metadata was modified.
+Parent independently reproduced that failure and verified **247 tests and 98
+subtests passing**, no xfails; package11, Ruff/scoped format, production-only strict
+basedpyright1.10.4 zero findings, 122 compatible dependencies and diff checks.
+Both changed Python paths have clean primary-server probes. Independent source
+review found no issues, without executing tests. Identities and controls are
+unchanged; no upstream PR or release is included.
+
 ### Raw error-code diagnostic (2026-11-07)
 
 [Fork PR #28](https://github.com/elmakus/hass-smarwi/pull/28), based on `ce8d31a`,
