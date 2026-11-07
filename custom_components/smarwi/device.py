@@ -45,6 +45,7 @@ class SmarwiDeviceProp(StrEnum):
     RIDGE_INSIDE = "ro"
     RSSI = "rssi"
     STATE_CODE = "s"
+    ERROR_CODE = "e"
     # others
     AVAILABLE = "available"
     FINETUNE_SETTINGS = "finetune_settings"
@@ -227,6 +228,11 @@ class SmarwiDevice:
         """Return the WiFi signal strength."""
         if SmarwiDeviceProp.RSSI in self._status:
             return int(self._status[SmarwiDeviceProp.RSSI])
+
+    @property
+    def error_code(self) -> str | None:
+        """Return the reported error code without inferring its meaning or type."""
+        return self._status.get(SmarwiDeviceProp.ERROR_CODE) or None
 
     @property
     def state_code(self) -> StateCode:

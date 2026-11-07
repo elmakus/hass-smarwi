@@ -59,6 +59,9 @@
        }
     },
     "sensor": {
+      "error_code": {
+        "name": "Error code"
+      },
       "rssi": {
         "name": "Signal strength"
       }
