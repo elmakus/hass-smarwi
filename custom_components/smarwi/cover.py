@@ -68,7 +68,7 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
     def available(self) -> bool:  # pyright:ignore[reportIncompatibleVariableOverride]
         return (
             self._attr_available
-            and self.device.ridge_fixed
+            and self.device.ridge_fixed is True
             and not self.device.state_code.is_error()
         )
 

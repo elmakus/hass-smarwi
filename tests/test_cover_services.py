@@ -3059,3 +3059,39 @@ async def test_reconnect_requires_status_observation_in_current_session(
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS, retain=False)
     await hass.async_block_till_done()
     assert hass.states.get(cover_id).attributes["status_source"] == "non_retained"
+
+
+@pytest.mark.parametrize("invalid", ["missing", "invalid"])
+async def test_unknown_ridge_telemetry_is_not_a_fault_or_fix_request(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    mqtt_mock: MqttMockHAClient,
+    cover_id: str,
+    invalid: str,
+) -> None:
+    """Keep unknown fixation/tamper values unknown and never toggle blindly."""
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    switch_id = entity_registry.async_get_entity_id(
+        "switch", DOMAIN, f"{DEVICE_ID}_ridge_fix"
+    )
+    sensor_id = entity_registry.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{DEVICE_ID}_ridge_inside"
+    )
+    assert switch_id and sensor_id
+    payload = STATUS.replace("fix:1\n", "").replace("ro:0\n", "")
+    if invalid == "invalid":
+        payload += "\nfix:invalid\nro:invalid"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+    await hass.async_block_till_done()
+    assert hass.states.get(switch_id).state == "unknown"
+    assert hass.states.get(sensor_id).state == "unknown"
+    assert hass.states.get(cover_id).state == "unavailable"
+    with pytest.raises(HomeAssistantError):
+        await device.async_toggle_ridge_fixed(True)
+    mqtt_mock.async_publish.assert_not_called()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    assert hass.states.get(switch_id).state == "on"
+    assert hass.states.get(sensor_id).state == "off"
+    assert hass.states.get(cover_id).state == "open"

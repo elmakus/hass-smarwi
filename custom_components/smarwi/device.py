@@ -237,14 +237,16 @@ class SmarwiDevice:
         return self._status.get(SmarwiDeviceProp.NAME)
 
     @property
-    def ridge_fixed(self) -> bool:
-        """Return `True` if the ridge is fixed, i.e. the window cannot be moved by hand."""
-        return self._status.get(SmarwiDeviceProp.RIDGE_FIXED) == "1"
+    def ridge_fixed(self) -> bool | None:
+        """Return known fixation state; missing or invalid telemetry is unknown."""
+        value = self._status.get(SmarwiDeviceProp.RIDGE_FIXED)
+        return value == "1" if value in ("0", "1") else None
 
     @property
-    def ridge_inside(self) -> bool:
-        """Return `True` if the ridge is inside the device, i.e. it can be controlled."""
-        return self._status.get(SmarwiDeviceProp.RIDGE_INSIDE) == "0"
+    def ridge_inside(self) -> bool | None:
+        """Return known ridge presence; preserve the existing wire polarity."""
+        value = self._status.get(SmarwiDeviceProp.RIDGE_INSIDE)
+        return value == "0" if value in ("0", "1") else None
 
     @property
     def rssi(self) -> int | None:
@@ -286,6 +288,8 @@ class SmarwiDevice:
 
     async def async_toggle_ridge_fixed(self, state: bool) -> None:
         """Fix (True) or release (False) the ridge."""
+        if self.ridge_fixed is None:
+            raise HomeAssistantError("SMARWI fixation state is unknown")
         if state and not self.ridge_fixed:
             LOGGER.info(f"[{self.name}] Fixing ridge")
             await self._async_mqtt_command("stop")

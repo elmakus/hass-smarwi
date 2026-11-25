@@ -48,5 +48,6 @@ class SmarwiRidgeInsideBinarySensor(SmarwiEntity, BinarySensorEntity):
     @override
     async def async_handle_update(self, changed_props: set[SmarwiDeviceProp]) -> None:
         if SmarwiDeviceProp.RIDGE_INSIDE in changed_props:
-            self._attr_is_on = not self.device.ridge_inside
+            inside = self.device.ridge_inside
+            self._attr_is_on = None if inside is None else not inside
             self.async_write_ha_state()
