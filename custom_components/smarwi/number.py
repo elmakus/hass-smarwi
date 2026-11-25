@@ -106,8 +106,7 @@ class SmarwiConfigNumber(SmarwiEntity, NumberEntity):
     @override
     async def async_handle_update(self, changed_props: set[SmarwiDeviceProp]) -> None:
         if SmarwiDeviceProp.FINETUNE_SETTINGS in changed_props:
-            if (
-                value := self.device.finetune_settings.get(self._setting_key)
-            ) is not None:
-                self._attr_native_value = value
-                self.async_write_ha_state()
+            self._attr_native_value = self.device.finetune_settings.get(
+                self._setting_key
+            )
+            self.async_write_ha_state()

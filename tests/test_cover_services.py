@@ -2696,3 +2696,308 @@ async def test_error_code_updates_and_session_lifecycle(
         await hass.async_block_till_done()
         writes.assert_not_called()
     mqtt_mock.async_publish.assert_not_called()
+
+
+# Settings transactions: synthetic readbacks, no live transport.
+SETTINGS = {
+    "vpct": 80,
+    "ospd": 20,
+    "ofspd": 10,
+    "orpwr": 50,
+    "ofpwr": 40,
+    "ohcpwr": 45,
+    "ohopwr": 35,
+    "hdist": -5,
+    "lwid": 15,
+    "future": 7,
+}
+
+
+async def test_settings_transactions_preserve_other_changes(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serialize two writes using live readbacks instead of a shared stale snapshot."""
+    from custom_components.smarwi.device import (
+        FinetuneSetting,
+        decode_keyval,
+        encode_keyval,
+    )
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    actual = SETTINGS.copy()
+    writes = []
+
+    async def publish(payload: str) -> None:
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(actual), retain=False)
+            )
+        else:
+            assert payload.startswith("scfa01/1|")
+            data = {
+                k: int(v) for k, v in decode_keyval(payload.split("|", 1)[1]).items()
+            }
+            writes.append(data)
+            await asyncio.sleep(0)
+            actual.update(data)
+
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(actual), retain=False)
+    )
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    await asyncio.gather(
+        settings.async_set(FinetuneSetting.MOVE_SPEED, 30),
+        settings.async_set(FinetuneSetting.MOVE_POWER, 60),
+    )
+    assert len(writes) == 2
+    assert actual == SETTINGS | {"ospd": 30, "orpwr": 60}
+
+
+async def test_settings_incomplete_readback_prevents_write(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not write a partial settings snapshot."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if payload == "lcfa":
+            await settings.async_handle_update(Mock(payload="ospd:20", retain=False))
+
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(SETTINGS), retain=False)
+    )
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert calls == ["lcfa"]
+
+
+async def test_settings_readback_mismatch_blocks_more_writes(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Require operator reconciliation after an uncertain write."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=False)
+            )
+
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(SETTINGS), retain=False)
+    )
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert len([x for x in calls if x.startswith("scfa01")]) == 1
+    before = calls.copy()
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
+    assert calls == before
+
+
+async def test_settings_calibrated_distance_is_not_writable(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Block write access to calibration even if manually enabled."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    publish = AsyncMock()
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(SETTINGS | {"cfdist": 1234}), retain=False)
+    )
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.CALIBRATED_DISTANCE, 100)
+    publish.assert_not_awaited()
+
+
+@pytest.mark.parametrize("event", ["retained", "timeout", "disconnect", "unload"])
+async def test_settings_prewrite_interruption(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch, event: str
+) -> None:
+    """An invalid or interrupted read cannot authorize a settings write."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    monkeypatch.setattr(settings, "_READBACK_TIMEOUT", 0.01)
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if event == "retained":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=True)
+            )
+        elif event == "disconnect":
+            device.async_broker_disconnected()
+        elif event == "unload":
+            settings.async_invalidate(closed=True)
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert calls == ["lcfa"]
+    assert settings._readback is None
+
+
+async def test_settings_cancelled_write_blocks_following_write(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancelled write can have reached the device; do not repeat it."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    started = asyncio.Event()
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=False)
+            )
+        else:
+            started.set()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    task = asyncio.create_task(settings.async_set(FinetuneSetting.MOVE_SPEED, 30))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    before = calls.copy()
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
+    assert calls == before
+
+
+async def test_settings_calibration_fields_excluded_from_write(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never echo either calibration distance spelling into an outgoing write."""
+    from custom_components.smarwi.device import (
+        FinetuneSetting,
+        decode_keyval,
+        encode_keyval,
+    )
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    actual = SETTINGS | {"cfdist": 1234, "cvdist": 1234}
+
+    async def publish(payload: str) -> None:
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(actual), retain=False)
+            )
+        else:
+            data = decode_keyval(payload.split("|", 1)[1])
+            assert "cfdist" not in data and "cvdist" not in data
+            actual.update({k: int(v) for k, v in data.items()})
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert actual["ospd"] == 30
+
+
+async def test_settings_missing_number_clears_previous_value(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Missing settings must not remain displayed as current numeric values."""
+    from custom_components.smarwi.device import encode_keyval
+
+    entity_id = entity_registry.async_get_entity_id(
+        "number", DOMAIN, f"{DEVICE_ID}_move_speed"
+    )
+    assert entity_id is not None
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/config/advanced", encode_keyval(SETTINGS)
+    )
+    await hass.async_block_till_done()
+    assert float(hass.states.get(entity_id).state) == 20
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/config/advanced", "vpct:91")
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "unavailable"
+
+
+async def test_settings_queued_request_does_not_cross_broker_session(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requests queued before a disconnect must not write after recovery."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    calls = []
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        started.set()
+        await release.wait()
+        await settings.async_handle_update(
+            Mock(payload=encode_keyval(SETTINGS), retain=False)
+        )
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    first = asyncio.create_task(settings.async_set(FinetuneSetting.MOVE_SPEED, 30))
+    await started.wait()
+    second = asyncio.create_task(settings.async_set(FinetuneSetting.MOVE_POWER, 60))
+    await asyncio.sleep(0)
+    device.async_broker_disconnected()
+    device._online = True
+    release.set()
+    for task in (first, second):
+        with pytest.raises(HomeAssistantError):
+            await task
+    assert calls == ["lcfa"]
+
+
+async def test_settings_postwrite_timeout_blocks_more_writes(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unanswered post-write request cannot lead to a retry."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    monkeypatch.setattr(settings, "_READBACK_TIMEOUT", 0.01)
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if len(calls) == 1:
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=False)
+            )
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert len(calls) == 3
+    assert calls[0] == calls[2] == "lcfa"
+    assert calls[1].startswith("scfa01/1|")
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
+    assert len(calls) == 3
