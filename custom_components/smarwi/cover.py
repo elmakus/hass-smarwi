@@ -140,11 +140,17 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
 
     @override
     async def async_handle_update(self, changed_props: set[SmarwiDeviceProp]) -> None:
+        if SmarwiDeviceProp.STATUS_SOURCE in changed_props:
+            self._attr_extra_state_attributes["status_source"] = (
+                self.device.status_source
+            )
         if not changed_props & {
             SmarwiDeviceProp.CLOSED,
             SmarwiDeviceProp.RIDGE_FIXED,
             SmarwiDeviceProp.STATE_CODE,
         }:
+            if SmarwiDeviceProp.STATUS_SOURCE in changed_props:
+                self.async_write_ha_state()
             return
 
         state = self.device.state_code

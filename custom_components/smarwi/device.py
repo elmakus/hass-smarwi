@@ -55,6 +55,7 @@ class SmarwiDeviceProp(StrEnum):
     ERROR_CODE = "e"
     # others
     AVAILABLE = "available"
+    STATUS_SOURCE = "status_source"
     FINETUNE_SETTINGS = "finetune_settings"
 
     @override
@@ -156,6 +157,7 @@ class SmarwiDevice:
         self._base_topic = f"ion/{self._remote_id}/%{device_id}"
         self._online = False
         self._status: dict[SmarwiDeviceProp, str] = {}
+        self._status_source = "unknown"
         self._finetune_settings = FinetuneSettings(self)
 
     @cached_property
@@ -186,15 +188,28 @@ class SmarwiDevice:
     @property
     def available(self) -> bool:
         """Require broker connection, session online observation and accepted status."""
-        return mqtt.is_connected(self._hass) and self._online and bool(self._status)
+        return (
+            mqtt.is_connected(self._hass)
+            and self._online
+            and self._status_source in ("retained", "non_retained")
+            and bool(self._status)
+        )
+
+    @property
+    def status_source(self) -> str:
+        """Identify the accepted status observation, not physical freshness."""
+        return self._status_source
 
     @callback
     def async_broker_disconnected(self) -> None:
         """Forget session online state without discarding last-known telemetry."""
         self._online = False
+        self._status_source = "previous_session" if self._status else "unknown"
         self.finetune_settings.async_invalidate()
         async_dispatcher_send(
-            self._hass, self.signal_update, {SmarwiDeviceProp.AVAILABLE}
+            self._hass,
+            self.signal_update,
+            {SmarwiDeviceProp.AVAILABLE, SmarwiDeviceProp.STATUS_SOURCE},
         )
 
     @property
@@ -333,7 +348,17 @@ class SmarwiDevice:
         status = {
             SmarwiDeviceProp(k): v
             for k, v in status.items()
-            if k in list(SmarwiDeviceProp)
+            if k
+            in (
+                prop.value
+                for prop in SmarwiDeviceProp
+                if prop
+                not in {
+                    SmarwiDeviceProp.AVAILABLE,
+                    SmarwiDeviceProp.STATUS_SOURCE,
+                    SmarwiDeviceProp.FINETUNE_SETTINGS,
+                }
+            )
         }
         if not status:
             return
@@ -352,6 +377,14 @@ class SmarwiDevice:
             for name in SmarwiDeviceProp
             if self._status.get(name) != status.get(name)
         }
+        source = (
+            ("retained" if msg.retain else "non_retained")
+            if mqtt.is_connected(self._hass)
+            else "previous_session"
+        )
+        if self._status_source != source:
+            self._status_source = source
+            changed_props.add(SmarwiDeviceProp.STATUS_SOURCE)
         LOGGER.debug(
             f"Received message from {msg.topic}:\n{msg.payload}\nChanged properties: {[e.name for e in changed_props]}"
         )
@@ -390,15 +423,20 @@ class SmarwiDevice:
         was_available = self.available
         # Retained online replay is an observation, not proof of fresh liveness.
         self._online = msg.payload == "1"
+        changed_props: set[SmarwiDeviceProp] = set()
         if not self._online:
             self.finetune_settings.async_invalidate()
+            source = "previous_session" if self._status else "unknown"
+            if self._status_source != source:
+                self._status_source = source
+                changed_props.add(SmarwiDeviceProp.STATUS_SOURCE)
         if (available := self.available) != was_available:
             LOGGER.info(
                 f"[{self.name}] SMARWI {self.id} become {'available' if available else 'unavailable'}"
             )
-            async_dispatcher_send(
-                self._hass, self.signal_update, {SmarwiDeviceProp.AVAILABLE}
-            )
+            changed_props.add(SmarwiDeviceProp.AVAILABLE)
+        if changed_props:
+            async_dispatcher_send(self._hass, self.signal_update, changed_props)
         await self.finetune_settings.async_update()
 
     async def _async_mqtt_command(self, payload: str) -> None:

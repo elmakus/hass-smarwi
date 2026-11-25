@@ -1846,7 +1846,9 @@ async def test_broker_session_recovery_preserves_last_known_cache(
     await hass.async_block_till_done()
     for device in devices.values():
         dispatcher_spy.assert_any_call(
-            hass, device.signal_update, {SmarwiDeviceProp.AVAILABLE}
+            hass,
+            device.signal_update,
+            {SmarwiDeviceProp.AVAILABLE, SmarwiDeviceProp.STATUS_SOURCE},
         )
         assert not device.available
     for entity_id in entity_ids:
@@ -1884,6 +1886,16 @@ async def test_broker_session_recovery_preserves_last_known_cache(
     mqtt_mock.async_publish.reset_mock()
     for topic in (BASE_TOPIC, second_topic):
         async_fire_mqtt_message(hass, f"{topic}/online", "1", retain=retained_online)
+        await hass.async_block_till_done()
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "unavailable"
+    for topic, payload in (
+        (BASE_TOPIC, STATUS),
+        (second_topic, STATUS.replace("Offline fixture", "Second fixture")),
+    ):
+        async_fire_mqtt_message(hass, f"{topic}/status", payload, retain=True)
         await hass.async_block_till_done()
     for entity_id in entity_ids:
         state = hass.states.get(entity_id)
@@ -1946,6 +1958,9 @@ async def test_broker_disconnected_discovery_cannot_arm_online(
     assert not device.available
     mqtt_mock.async_publish.assert_not_called()
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+    await hass.async_block_till_done()
+    assert not device.available
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS, retain=True)
     await hass.async_block_till_done()
     assert device.available
 
@@ -2665,7 +2680,17 @@ async def test_error_code_updates_and_session_lifecycle(
     await hass.async_block_till_done()
     state = hass.states.get(sensor_id)
     assert state is not None
-    assert state.state == "0"  # Last known, not a fresh device report.
+    assert state.state == "unavailable"
+    async_fire_mqtt_message(
+        hass,
+        f"{BASE_TOPIC}/status",
+        STATUS.replace("s:250", "s:10") + "\ne:0",
+        retain=True,
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(sensor_id)
+    assert state is not None
+    assert state.state == "0"  # Retained, not proof of a fresh physical report.
     mqtt_mock.async_publish.assert_called_once_with(
         f"{BASE_TOPIC}/cmd", "lcfa", 2, False, message_expiry_interval=None
     )
@@ -3001,3 +3026,36 @@ async def test_settings_postwrite_timeout_blocks_more_writes(
     with pytest.raises(HomeAssistantError):
         await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("status_first", [False, True])
+async def test_reconnect_requires_status_observation_in_current_session(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    broker_connection: Mock,
+    status_first: bool,
+) -> None:
+    """Both online and status observations must belong to the recovered session."""
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    broker_connection(False)
+    await hass.async_block_till_done()
+    broker_connection(True)
+    await hass.async_block_till_done()
+    topics = [("online", "1"), ("status", STATUS)]
+    if status_first:
+        topics.reverse()
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/{topics[0][0]}", topics[0][1], retain=True
+    )
+    await hass.async_block_till_done()
+    assert not device.available
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/{topics[1][0]}", topics[1][1], retain=True
+    )
+    await hass.async_block_till_done()
+    assert device.available
+    assert hass.states.get(cover_id).attributes["status_source"] == "retained"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS, retain=False)
+    await hass.async_block_till_done()
+    assert hass.states.get(cover_id).attributes["status_source"] == "non_retained"
