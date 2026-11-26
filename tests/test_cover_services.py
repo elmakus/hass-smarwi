@@ -1399,6 +1399,59 @@ async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
     assert ATTR_CURRENT_POSITION not in state.attributes
 
 
+@pytest.mark.parametrize(
+    ("service", "data"),
+    [
+        ("close_cover_tilt", {}),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 0}),
+    ],
+)
+async def test_close_after_stop_with_unknown_position(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    cover_id: str,
+    service: str,
+    data: dict[str, int],
+) -> None:
+    """A zero target is closing even after Stop invalidates the estimate."""
+    await hass.services.async_call(
+        "cover", "open_cover_tilt", {"entity_id": cover_id}, blocking=True
+    )
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", "s:210")
+    )
+    await hass.async_block_till_done()
+    await hass.services.async_call(
+        "cover", "stop_cover_tilt", {"entity_id": cover_id}, blocking=True
+    )
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    mqtt_mock.async_publish.reset_mock()
+    await hass.services.async_call(
+        "cover", service, {"entity_id": cover_id, **data}, blocking=True
+    )
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", "close", 2, False, message_expiry_interval=None
+    )
+    for code in (220, 230):
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", f"s:{code}")
+        )
+        await hass.async_block_till_done()
+        state = hass.states.get(cover_id)
+        assert state is not None
+        assert state.state == "closing"
+        assert ATTR_CURRENT_TILT_POSITION not in state.attributes
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "closed"
+    assert state.attributes[ATTR_CURRENT_TILT_POSITION] == 0
+
+
 async def test_status_with_empty_lines_updates_the_cover(
     hass: HomeAssistant, mqtt_mock: MqttMockHAClient, cover_id: str
 ) -> None:
