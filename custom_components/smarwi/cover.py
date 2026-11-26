@@ -87,7 +87,9 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
     def is_opening(self) -> bool:  # pyright:ignore[reportIncompatibleVariableOverride]
         # NOTE: SMARWI reports OPENING even when closing to a position,
         #  so we don't rely on the state_code if we have _requested_position.
-        if self._requested_position >= 0:
+        if self._requested_position == 0:
+            return False
+        if self._requested_position > 0:
             return self._is_moving and self._requested_position > self._position
         else:  # if initiated outside of HASS
             return self.device.state_code.is_opening()
