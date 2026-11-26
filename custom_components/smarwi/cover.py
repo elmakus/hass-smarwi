@@ -68,7 +68,7 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
     def available(self) -> bool:  # pyright:ignore[reportIncompatibleVariableOverride]
         return (
             self._attr_available
-            and self.device.ridge_fixed
+            and self.device.ridge_fixed is True
             and not self.device.state_code.is_error()
         )
 
@@ -87,7 +87,9 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
     def is_opening(self) -> bool:  # pyright:ignore[reportIncompatibleVariableOverride]
         # NOTE: SMARWI reports OPENING even when closing to a position,
         #  so we don't rely on the state_code if we have _requested_position.
-        if self._requested_position >= 0:
+        if self._requested_position == 0:
+            return False
+        if self._requested_position > 0:
             return self._is_moving and self._requested_position > self._position
         else:  # if initiated outside of HASS
             return self.device.state_code.is_opening()
@@ -140,11 +142,17 @@ class SmarwiCover(SmarwiEntity, CoverEntity):
 
     @override
     async def async_handle_update(self, changed_props: set[SmarwiDeviceProp]) -> None:
+        if SmarwiDeviceProp.STATUS_SOURCE in changed_props:
+            self._attr_extra_state_attributes["status_source"] = (
+                self.device.status_source
+            )
         if not changed_props & {
             SmarwiDeviceProp.CLOSED,
             SmarwiDeviceProp.RIDGE_FIXED,
             SmarwiDeviceProp.STATE_CODE,
         }:
+            if SmarwiDeviceProp.STATUS_SOURCE in changed_props:
+                self.async_write_ha_state()
             return
 
         state = self.device.state_code

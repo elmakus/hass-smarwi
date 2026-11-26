@@ -1399,6 +1399,59 @@ async def test_stop_tilt_then_idle_status_invalidates_inferred_position(
     assert ATTR_CURRENT_POSITION not in state.attributes
 
 
+@pytest.mark.parametrize(
+    ("service", "data"),
+    [
+        ("close_cover_tilt", {}),
+        ("set_cover_tilt_position", {ATTR_TILT_POSITION: 0}),
+    ],
+)
+async def test_close_after_stop_with_unknown_position(
+    hass: HomeAssistant,
+    mqtt_mock: MqttMockHAClient,
+    cover_id: str,
+    service: str,
+    data: dict[str, int],
+) -> None:
+    """A zero target is closing even after Stop invalidates the estimate."""
+    await hass.services.async_call(
+        "cover", "open_cover_tilt", {"entity_id": cover_id}, blocking=True
+    )
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", "s:210")
+    )
+    await hass.async_block_till_done()
+    await hass.services.async_call(
+        "cover", "stop_cover_tilt", {"entity_id": cover_id}, blocking=True
+    )
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    mqtt_mock.async_publish.reset_mock()
+    await hass.services.async_call(
+        "cover", service, {"entity_id": cover_id, **data}, blocking=True
+    )
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", "close", 2, False, message_expiry_interval=None
+    )
+    for code in (220, 230):
+        async_fire_mqtt_message(
+            hass, f"{BASE_TOPIC}/status", STATUS.replace("s:250", f"s:{code}")
+        )
+        await hass.async_block_till_done()
+        state = hass.states.get(cover_id)
+        assert state is not None
+        assert state.state == "closing"
+        assert ATTR_CURRENT_TILT_POSITION not in state.attributes
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("pos:o", "pos:c")
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(cover_id)
+    assert state is not None
+    assert state.state == "closed"
+    assert state.attributes[ATTR_CURRENT_TILT_POSITION] == 0
+
+
 async def test_status_with_empty_lines_updates_the_cover(
     hass: HomeAssistant, mqtt_mock: MqttMockHAClient, cover_id: str
 ) -> None:
@@ -1846,7 +1899,9 @@ async def test_broker_session_recovery_preserves_last_known_cache(
     await hass.async_block_till_done()
     for device in devices.values():
         dispatcher_spy.assert_any_call(
-            hass, device.signal_update, {SmarwiDeviceProp.AVAILABLE}
+            hass,
+            device.signal_update,
+            {SmarwiDeviceProp.AVAILABLE, SmarwiDeviceProp.STATUS_SOURCE},
         )
         assert not device.available
     for entity_id in entity_ids:
@@ -1884,6 +1939,16 @@ async def test_broker_session_recovery_preserves_last_known_cache(
     mqtt_mock.async_publish.reset_mock()
     for topic in (BASE_TOPIC, second_topic):
         async_fire_mqtt_message(hass, f"{topic}/online", "1", retain=retained_online)
+        await hass.async_block_till_done()
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "unavailable"
+    for topic, payload in (
+        (BASE_TOPIC, STATUS),
+        (second_topic, STATUS.replace("Offline fixture", "Second fixture")),
+    ):
+        async_fire_mqtt_message(hass, f"{topic}/status", payload, retain=True)
         await hass.async_block_till_done()
     for entity_id in entity_ids:
         state = hass.states.get(entity_id)
@@ -1946,6 +2011,9 @@ async def test_broker_disconnected_discovery_cannot_arm_online(
     assert not device.available
     mqtt_mock.async_publish.assert_not_called()
     async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "1")
+    await hass.async_block_till_done()
+    assert not device.available
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS, retain=True)
     await hass.async_block_till_done()
     assert device.available
 
@@ -2665,7 +2733,17 @@ async def test_error_code_updates_and_session_lifecycle(
     await hass.async_block_till_done()
     state = hass.states.get(sensor_id)
     assert state is not None
-    assert state.state == "0"  # Last known, not a fresh device report.
+    assert state.state == "unavailable"
+    async_fire_mqtt_message(
+        hass,
+        f"{BASE_TOPIC}/status",
+        STATUS.replace("s:250", "s:10") + "\ne:0",
+        retain=True,
+    )
+    await hass.async_block_till_done()
+    state = hass.states.get(sensor_id)
+    assert state is not None
+    assert state.state == "0"  # Retained, not proof of a fresh physical report.
     mqtt_mock.async_publish.assert_called_once_with(
         f"{BASE_TOPIC}/cmd", "lcfa", 2, False, message_expiry_interval=None
     )
@@ -2696,3 +2774,377 @@ async def test_error_code_updates_and_session_lifecycle(
         await hass.async_block_till_done()
         writes.assert_not_called()
     mqtt_mock.async_publish.assert_not_called()
+
+
+# Settings transactions: synthetic readbacks, no live transport.
+SETTINGS = {
+    "vpct": 80,
+    "ospd": 20,
+    "ofspd": 10,
+    "orpwr": 50,
+    "ofpwr": 40,
+    "ohcpwr": 45,
+    "ohopwr": 35,
+    "hdist": -5,
+    "lwid": 15,
+    "future": 7,
+}
+
+
+async def test_settings_transactions_preserve_other_changes(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serialize two writes using live readbacks instead of a shared stale snapshot."""
+    from custom_components.smarwi.device import (
+        FinetuneSetting,
+        decode_keyval,
+        encode_keyval,
+    )
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    actual = SETTINGS.copy()
+    writes = []
+
+    async def publish(payload: str) -> None:
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(actual), retain=False)
+            )
+        else:
+            assert payload.startswith("scfa01/1|")
+            data = {
+                k: int(v) for k, v in decode_keyval(payload.split("|", 1)[1]).items()
+            }
+            writes.append(data)
+            await asyncio.sleep(0)
+            actual.update(data)
+
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(actual), retain=False)
+    )
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    await asyncio.gather(
+        settings.async_set(FinetuneSetting.MOVE_SPEED, 30),
+        settings.async_set(FinetuneSetting.MOVE_POWER, 60),
+    )
+    assert len(writes) == 2
+    assert actual == SETTINGS | {"ospd": 30, "orpwr": 60}
+
+
+async def test_settings_incomplete_readback_prevents_write(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Do not write a partial settings snapshot."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if payload == "lcfa":
+            await settings.async_handle_update(Mock(payload="ospd:20", retain=False))
+
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(SETTINGS), retain=False)
+    )
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert calls == ["lcfa"]
+
+
+async def test_settings_readback_mismatch_blocks_more_writes(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Require operator reconciliation after an uncertain write."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=False)
+            )
+
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(SETTINGS), retain=False)
+    )
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert len([x for x in calls if x.startswith("scfa01")]) == 1
+    before = calls.copy()
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
+    assert calls == before
+
+
+async def test_settings_calibrated_distance_is_not_writable(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Block write access to calibration even if manually enabled."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    publish = AsyncMock()
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    await settings.async_handle_update(
+        Mock(payload=encode_keyval(SETTINGS | {"cfdist": 1234}), retain=False)
+    )
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.CALIBRATED_DISTANCE, 100)
+    publish.assert_not_awaited()
+
+
+@pytest.mark.parametrize("event", ["retained", "timeout", "disconnect", "unload"])
+async def test_settings_prewrite_interruption(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch, event: str
+) -> None:
+    """An invalid or interrupted read cannot authorize a settings write."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    monkeypatch.setattr(settings, "_READBACK_TIMEOUT", 0.01)
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if event == "retained":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=True)
+            )
+        elif event == "disconnect":
+            device.async_broker_disconnected()
+        elif event == "unload":
+            settings.async_invalidate(closed=True)
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert calls == ["lcfa"]
+    assert settings._readback is None
+
+
+async def test_settings_cancelled_write_blocks_following_write(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancelled write can have reached the device; do not repeat it."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    started = asyncio.Event()
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=False)
+            )
+        else:
+            started.set()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    task = asyncio.create_task(settings.async_set(FinetuneSetting.MOVE_SPEED, 30))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    before = calls.copy()
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
+    assert calls == before
+
+
+async def test_settings_calibration_fields_excluded_from_write(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never echo either calibration distance spelling into an outgoing write."""
+    from custom_components.smarwi.device import (
+        FinetuneSetting,
+        decode_keyval,
+        encode_keyval,
+    )
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    actual = SETTINGS | {"cfdist": 1234, "cvdist": 1234}
+
+    async def publish(payload: str) -> None:
+        if payload == "lcfa":
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(actual), retain=False)
+            )
+        else:
+            data = decode_keyval(payload.split("|", 1)[1])
+            assert "cfdist" not in data and "cvdist" not in data
+            actual.update({k: int(v) for k, v in data.items()})
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert actual["ospd"] == 30
+
+
+async def test_settings_missing_number_clears_previous_value(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Missing settings must not remain displayed as current numeric values."""
+    from custom_components.smarwi.device import encode_keyval
+
+    entity_id = entity_registry.async_get_entity_id(
+        "number", DOMAIN, f"{DEVICE_ID}_move_speed"
+    )
+    assert entity_id is not None
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/config/advanced", encode_keyval(SETTINGS)
+    )
+    await hass.async_block_till_done()
+    assert float(hass.states.get(entity_id).state) == 20
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/config/advanced", "vpct:91")
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "unavailable"
+
+
+async def test_settings_queued_request_does_not_cross_broker_session(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requests queued before a disconnect must not write after recovery."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    calls = []
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        started.set()
+        await release.wait()
+        await settings.async_handle_update(
+            Mock(payload=encode_keyval(SETTINGS), retain=False)
+        )
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    first = asyncio.create_task(settings.async_set(FinetuneSetting.MOVE_SPEED, 30))
+    await started.wait()
+    second = asyncio.create_task(settings.async_set(FinetuneSetting.MOVE_POWER, 60))
+    await asyncio.sleep(0)
+    device.async_broker_disconnected()
+    device._online = True
+    release.set()
+    for task in (first, second):
+        with pytest.raises(HomeAssistantError):
+            await task
+    assert calls == ["lcfa"]
+
+
+async def test_settings_postwrite_timeout_blocks_more_writes(
+    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unanswered post-write request cannot lead to a retry."""
+    from custom_components.smarwi.device import FinetuneSetting, encode_keyval
+
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    settings = device.finetune_settings
+    monkeypatch.setattr(settings, "_READBACK_TIMEOUT", 0.01)
+    calls = []
+
+    async def publish(payload: str) -> None:
+        calls.append(payload)
+        if len(calls) == 1:
+            await settings.async_handle_update(
+                Mock(payload=encode_keyval(SETTINGS), retain=False)
+            )
+
+    monkeypatch.setattr(device, "_async_mqtt_command", publish)
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
+    assert len(calls) == 3
+    assert calls[0] == calls[2] == "lcfa"
+    assert calls[1].startswith("scfa01/1|")
+    with pytest.raises(HomeAssistantError):
+        await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("status_first", [False, True])
+async def test_reconnect_requires_status_observation_in_current_session(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    cover_id: str,
+    broker_connection: Mock,
+    status_first: bool,
+) -> None:
+    """Both online and status observations must belong to the recovered session."""
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    broker_connection(False)
+    await hass.async_block_till_done()
+    broker_connection(True)
+    await hass.async_block_till_done()
+    topics = [("online", "1"), ("status", STATUS)]
+    if status_first:
+        topics.reverse()
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/{topics[0][0]}", topics[0][1], retain=True
+    )
+    await hass.async_block_till_done()
+    assert not device.available
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/{topics[1][0]}", topics[1][1], retain=True
+    )
+    await hass.async_block_till_done()
+    assert device.available
+    assert hass.states.get(cover_id).attributes["status_source"] == "retained"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS, retain=False)
+    await hass.async_block_till_done()
+    assert hass.states.get(cover_id).attributes["status_source"] == "non_retained"
+
+
+@pytest.mark.parametrize("invalid", ["missing", "invalid"])
+async def test_unknown_ridge_telemetry_is_not_a_fault_or_fix_request(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    mqtt_mock: MqttMockHAClient,
+    cover_id: str,
+    invalid: str,
+) -> None:
+    """Keep unknown fixation/tamper values unknown and never toggle blindly."""
+    device = smarwi_entry.runtime_data[DEVICE_ID]
+    switch_id = entity_registry.async_get_entity_id(
+        "switch", DOMAIN, f"{DEVICE_ID}_ridge_fix"
+    )
+    sensor_id = entity_registry.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{DEVICE_ID}_ridge_inside"
+    )
+    assert switch_id and sensor_id
+    payload = STATUS.replace("fix:1\n", "").replace("ro:0\n", "")
+    if invalid == "invalid":
+        payload += "\nfix:invalid\nro:invalid"
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", payload)
+    await hass.async_block_till_done()
+    assert hass.states.get(switch_id).state == "unknown"
+    assert hass.states.get(sensor_id).state == "unknown"
+    assert hass.states.get(cover_id).state == "unavailable"
+    with pytest.raises(HomeAssistantError):
+        await device.async_toggle_ridge_fixed(True)
+    mqtt_mock.async_publish.assert_not_called()
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    assert hass.states.get(switch_id).state == "on"
+    assert hass.states.get(sensor_id).state == "off"
+    assert hass.states.get(cover_id).state == "open"

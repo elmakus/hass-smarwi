@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2024 Jakub Jirutka <jakub@jirutka.cz>
 from __future__ import annotations
 
-from asyncio import CancelledError, Event
+from asyncio import CancelledError, Event, Future, Lock, get_running_loop, timeout
 from collections.abc import Awaitable, Callable
 from enum import IntEnum, StrEnum
 from functools import cached_property
@@ -14,6 +14,7 @@ from typing_extensions import override
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -28,7 +29,13 @@ from .const import (
     signal_device_update,
 )
 
-__all__ = ["FinetuneSetting", "SmarwiConfigEntry", "SmarwiDevice", "SmarwiDeviceProp", "StateCode"]
+__all__ = [
+    "FinetuneSetting",
+    "SmarwiConfigEntry",
+    "SmarwiDevice",
+    "SmarwiDeviceProp",
+    "StateCode",
+]
 
 SmarwiConfigEntry: TypeAlias = ConfigEntry[dict[str, "SmarwiDevice"]]
 
@@ -48,6 +55,7 @@ class SmarwiDeviceProp(StrEnum):
     ERROR_CODE = "e"
     # others
     AVAILABLE = "available"
+    STATUS_SOURCE = "status_source"
     FINETUNE_SETTINGS = "finetune_settings"
 
     @override
@@ -149,6 +157,7 @@ class SmarwiDevice:
         self._base_topic = f"ion/{self._remote_id}/%{device_id}"
         self._online = False
         self._status: dict[SmarwiDeviceProp, str] = {}
+        self._status_source = "unknown"
         self._finetune_settings = FinetuneSettings(self)
 
     @cached_property
@@ -179,14 +188,28 @@ class SmarwiDevice:
     @property
     def available(self) -> bool:
         """Require broker connection, session online observation and accepted status."""
-        return mqtt.is_connected(self._hass) and self._online and bool(self._status)
+        return (
+            mqtt.is_connected(self._hass)
+            and self._online
+            and self._status_source in ("retained", "non_retained")
+            and bool(self._status)
+        )
+
+    @property
+    def status_source(self) -> str:
+        """Identify the accepted status observation, not physical freshness."""
+        return self._status_source
 
     @callback
     def async_broker_disconnected(self) -> None:
         """Forget session online state without discarding last-known telemetry."""
         self._online = False
+        self._status_source = "previous_session" if self._status else "unknown"
+        self.finetune_settings.async_invalidate()
         async_dispatcher_send(
-            self._hass, self.signal_update, {SmarwiDeviceProp.AVAILABLE}
+            self._hass,
+            self.signal_update,
+            {SmarwiDeviceProp.AVAILABLE, SmarwiDeviceProp.STATUS_SOURCE},
         )
 
     @property
@@ -214,14 +237,16 @@ class SmarwiDevice:
         return self._status.get(SmarwiDeviceProp.NAME)
 
     @property
-    def ridge_fixed(self) -> bool:
-        """Return `True` if the ridge is fixed, i.e. the window cannot be moved by hand."""
-        return self._status.get(SmarwiDeviceProp.RIDGE_FIXED) == "1"
+    def ridge_fixed(self) -> bool | None:
+        """Return known fixation state; missing or invalid telemetry is unknown."""
+        value = self._status.get(SmarwiDeviceProp.RIDGE_FIXED)
+        return value == "1" if value in ("0", "1") else None
 
     @property
-    def ridge_inside(self) -> bool:
-        """Return `True` if the ridge is inside the device, i.e. it can be controlled."""
-        return self._status.get(SmarwiDeviceProp.RIDGE_INSIDE) == "0"
+    def ridge_inside(self) -> bool | None:
+        """Return known ridge presence; preserve the existing wire polarity."""
+        value = self._status.get(SmarwiDeviceProp.RIDGE_INSIDE)
+        return value == "0" if value in ("0", "1") else None
 
     @property
     def rssi(self) -> int | None:
@@ -263,6 +288,8 @@ class SmarwiDevice:
 
     async def async_toggle_ridge_fixed(self, state: bool) -> None:
         """Fix (True) or release (False) the ridge."""
+        if self.ridge_fixed is None:
+            raise HomeAssistantError("SMARWI fixation state is unknown")
         if state and not self.ridge_fixed:
             LOGGER.info(f"[{self.name}] Fixing ridge")
             await self._async_mqtt_command("stop")
@@ -280,6 +307,7 @@ class SmarwiDevice:
         def cleanup() -> None:
             nonlocal closed
             closed = True
+            self.finetune_settings.async_invalidate(closed=True)
             ready.set()
             while unsubscribers:
                 unsubscribers.pop()()
@@ -324,7 +352,17 @@ class SmarwiDevice:
         status = {
             SmarwiDeviceProp(k): v
             for k, v in status.items()
-            if k in list(SmarwiDeviceProp)
+            if k
+            in (
+                prop.value
+                for prop in SmarwiDeviceProp
+                if prop
+                not in {
+                    SmarwiDeviceProp.AVAILABLE,
+                    SmarwiDeviceProp.STATUS_SOURCE,
+                    SmarwiDeviceProp.FINETUNE_SETTINGS,
+                }
+            )
         }
         if not status:
             return
@@ -343,6 +381,14 @@ class SmarwiDevice:
             for name in SmarwiDeviceProp
             if self._status.get(name) != status.get(name)
         }
+        source = (
+            ("retained" if msg.retain else "non_retained")
+            if mqtt.is_connected(self._hass)
+            else "previous_session"
+        )
+        if self._status_source != source:
+            self._status_source = source
+            changed_props.add(SmarwiDeviceProp.STATUS_SOURCE)
         LOGGER.debug(
             f"Received message from {msg.topic}:\n{msg.payload}\nChanged properties: {[e.name for e in changed_props]}"
         )
@@ -381,13 +427,20 @@ class SmarwiDevice:
         was_available = self.available
         # Retained online replay is an observation, not proof of fresh liveness.
         self._online = msg.payload == "1"
+        changed_props: set[SmarwiDeviceProp] = set()
+        if not self._online:
+            self.finetune_settings.async_invalidate()
+            source = "previous_session" if self._status else "unknown"
+            if self._status_source != source:
+                self._status_source = source
+                changed_props.add(SmarwiDeviceProp.STATUS_SOURCE)
         if (available := self.available) != was_available:
             LOGGER.info(
                 f"[{self.name}] SMARWI {self.id} become {'available' if available else 'unavailable'}"
             )
-            async_dispatcher_send(
-                self._hass, self.signal_update, {SmarwiDeviceProp.AVAILABLE}
-            )
+            changed_props.add(SmarwiDeviceProp.AVAILABLE)
+        if changed_props:
+            async_dispatcher_send(self._hass, self.signal_update, changed_props)
         await self.finetune_settings.async_update()
 
     async def _async_mqtt_command(self, payload: str) -> None:
@@ -411,22 +464,120 @@ class SmarwiDevice:
 
 
 class FinetuneSettings:
+    """Serialize settings writes and compare observed configuration readbacks."""
+
+    _READBACK_TIMEOUT = 10
+
     def __init__(self, device: SmarwiDevice) -> None:
         super().__init__()
         self._device = device
         self._data: dict[str, int] = {}
+        self._write_lock = Lock()
+        self._readback: Future[dict[str, int] | None] | None = None
+        self._session = 0
+        self._closed = False
+        self._write_uncertain = False
 
     def get(self, key: FinetuneSetting) -> int | None:
         return self._data.get(key.value)
 
+    @callback
+    def async_invalidate(self, *, closed: bool = False) -> None:
+        """Invalidate outstanding reads when connectivity or ownership is lost."""
+        self._session += 1
+        self._closed = self._closed or closed
+        if self._readback is not None and not self._readback.done():
+            self._readback.set_result(None)
+
+    @staticmethod
+    def _valid_value(key: FinetuneSetting, value: int) -> bool:
+        if key == FinetuneSetting.CALIBRATED_DISTANCE:
+            return False
+        if key == FinetuneSetting.CLOSED_POSITION:
+            return -20 <= value <= 20
+        if key == FinetuneSetting.LOCK_ERR_TRIGGER:
+            return 0 <= value <= 40
+        return 0 <= value <= 100
+
+    def _check_session(self, session: int) -> None:
+        if (
+            self._closed
+            or self._session != session
+            or not self._device.available
+            or not self._device.state_code.is_idle()
+        ):
+            raise HomeAssistantError(
+                "SMARWI must be available and idle to change settings"
+            )
+
+    @staticmethod
+    def _writable_data(data: dict[str, int]) -> dict[str, int]:
+        # Both spellings are excluded: vendor calibration distance is read-only.
+        return {k: v for k, v in data.items() if k not in ("cfdist", "cvdist")}
+
+    def _validate_snapshot(self, data: dict[str, int]) -> dict[str, int]:
+        writable = self._writable_data(data)
+        for key in FinetuneSetting:
+            if key == FinetuneSetting.CALIBRATED_DISTANCE:
+                continue
+            if key.value not in writable or not self._valid_value(
+                key, writable[key.value]
+            ):
+                raise HomeAssistantError(
+                    "SMARWI settings readback is incomplete or invalid"
+                )
+        return writable
+
+    async def _async_readback(self, session: int) -> dict[str, int]:
+        """Request a live observation, not a correlated firmware ACK."""
+        self._check_session(session)
+        waiter: Future[dict[str, int] | None] = get_running_loop().create_future()
+        self._readback = waiter
+        try:
+            async with timeout(self._READBACK_TIMEOUT):
+                await self.async_update()
+                data = await waiter
+        except TimeoutError as err:
+            raise HomeAssistantError("SMARWI settings readback timed out") from err
+        finally:
+            self._readback = None
+            if not waiter.done():
+                _ = waiter.cancel()
+        self._check_session(session)
+        if data is None:
+            raise HomeAssistantError("SMARWI settings readback was interrupted")
+        return self._validate_snapshot(data)
+
     async def async_set(self, key: FinetuneSetting, value: int) -> None:
-        data = self._data.copy()
-        data[key.value] = value
-        LOGGER.info(
-            f"[{self._device.name}] Changing Finetune setting {key.name} from {self._data[key.value]} to {value}"
-        )
-        await self._device._async_mqtt_command(f"scfa01/1|{encode_keyval(data)}")  # pyright:ignore[reportPrivateUsage]
-        await self.async_update()
+        if not self._valid_value(key, value):
+            raise HomeAssistantError(
+                "SMARWI setting is read-only or outside its allowed range"
+            )
+        session = self._session
+        async with self._write_lock:
+            self._check_session(session)
+            if self._write_uncertain:
+                raise HomeAssistantError(
+                    "SMARWI previous settings write is unconfirmed; verify device settings before reloading the integration"
+                )
+            data = await self._async_readback(session)
+            if data[key.value] == value:
+                return
+            data[key.value] = value
+            self._check_session(session)
+            try:
+                await self._device._async_mqtt_command(  # pyright:ignore[reportPrivateUsage]
+                    f"scfa01/1|{encode_keyval(data)}"
+                )
+                observed = await self._async_readback(session)
+                if observed != data:
+                    raise HomeAssistantError(
+                        "SMARWI settings readback does not match the requested configuration"
+                    )
+            except (Exception, CancelledError):
+                # A failed call may have reached the device. Never retry blindly.
+                self._write_uncertain = True
+                raise
 
     async def async_update(self) -> None:
         """Send command to request the Finetune settings from SMARWI."""
@@ -449,6 +600,8 @@ class FinetuneSettings:
             return
         if not data:
             return
+        if not msg.retain and self._readback is not None and not self._readback.done():
+            self._readback.set_result(data.copy())
         if data != self._data:
             self._data = data
             async_dispatcher_send(
