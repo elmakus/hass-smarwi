@@ -1,0 +1,47 @@
+name: Publish SMARWI 0.4.0
+
+on:
+  push:
+    branches:
+      - publish/0.4.0
+    paths:
+      - .github/workflows/publish-0.4.0.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-smarwi-0.4.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'elmakus/hass-smarwi' && github.ref == 'refs/heads/publish/0.4.0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: e17b91b80058ac4e88b3c8859fb48d0179c6b6f8
+          persist-credentials: false
+      - name: Verify source and build exact release
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = e17b91b80058ac4e88b3c8859fb48d0179c6b6f8
+          python3 -m unittest discover -s tests -p test_package.py -v
+          python3 scripts/build_release.py --tag 0.4.0
+          sha256sum dist/smarwi.zip
+      - name: Publish the authorized stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: elmakus/hass-smarwi
+        run: |
+          set -eu
+          test -z "$(git ls-remote --tags origin refs/tags/0.4.0)"
+          gh release create 0.4.0 dist/smarwi.zip \
+            --target e17b91b80058ac4e88b3c8859fb48d0179c6b6f8 \
+            --title "SMARWI 0.4.0" \
+            --notes-file docs/release-0.4.0.md \
+            --latest
