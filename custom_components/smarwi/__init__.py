@@ -5,11 +5,13 @@
 from asyncio import CancelledError
 
 from homeassistant.components import mqtt
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.device_registry import AnyDeviceEntry
 
-from .const import CONF_REMOTE_ID, LOGGER
+from .const import CONF_REMOTE_ID, DOMAIN, LOGGER
 from .device import SmarwiConfigEntry, SmarwiDevice
 
 PLATFORMS: list[Platform] = [
@@ -81,3 +83,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: SmarwiConfigEntry) -> bo
 async def async_unload_entry(hass: HomeAssistant, entry: SmarwiConfigEntry) -> bool:
     """Handle removal of an entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: SmarwiConfigEntry, device_entry: AnyDeviceEntry
+) -> bool:
+    """Allow manual removal only of devices not discovered in this loaded entry."""
+    if config_entry.state != ConfigEntryState.LOADED:
+        return False
+    serials = {serial for domain, serial in device_entry.identifiers if domain == DOMAIN}
+    return bool(serials) and serials.isdisjoint(config_entry.runtime_data)

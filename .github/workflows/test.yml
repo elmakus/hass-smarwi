@@ -31,4 +31,18 @@ jobs:
         run: python3 -m pip install -r requirements-tests.txt
 
       - name: Test public tilt services with simulated MQTT and direct contracts
+        run: |
+          python3 -m coverage run --branch --source=custom_components/smarwi -m pytest -q
+          python3 -m coverage report -m
+          for module in custom_components/smarwi/*.py; do
+            python3 -m coverage report --include="$module" --precision=2 --fail-under=95.01
+          done
+          python3 -m coverage report --include=custom_components/smarwi/config_flow.py --fail-under=100
+
+      - name: Install matching HA 2026.11.3 and official fixtures
+        run: |
+          python3 -m pip install --upgrade homeassistant==2026.11.3 pytest-homeassistant==2026.11.3
+          python3 -m pip check
+
+      - name: Regression on HA 2026.11.3
         run: python3 -m pytest -q

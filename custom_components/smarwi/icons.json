@@ -1,0 +1,50 @@
+{
+  "entity": {
+    "sensor": {
+      "error_code": {
+        "default": "mdi:alert-circle-outline"
+      }
+    },
+    "switch": {
+      "ridge_fix": {
+        "default": "mdi:lock",
+        "state": {
+          "on": "mdi:lock",
+          "off": "mdi:lock-open-variant"
+        }
+      }
+    },
+    "number": {
+      "max_open_position": {
+        "default": "mdi:window-open"
+      },
+      "move_speed": {
+        "default": "mdi:speedometer"
+      },
+      "frame_speed": {
+        "default": "mdi:speedometer-slow"
+      },
+      "move_power": {
+        "default": "mdi:flash"
+      },
+      "frame_power": {
+        "default": "mdi:flash"
+      },
+      "closed_hold_power": {
+        "default": "mdi:flash"
+      },
+      "opened_hold_power": {
+        "default": "mdi:flash"
+      },
+      "closed_position": {
+        "default": "mdi:tune"
+      },
+      "lock_err_trigger": {
+        "default": "mdi:alert-circle-outline"
+      },
+      "calibrated_distance": {
+        "default": "mdi:ruler"
+      }
+    }
+  }
+}

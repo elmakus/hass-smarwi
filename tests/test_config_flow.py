@@ -4,14 +4,20 @@ import asyncio
 import json
 from pathlib import Path
 import socket
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from pytest_homeassistant.common import MockConfigEntry
 
-from homeassistant.config_entries import ConfigFlowResult, SOURCE_USER
+from homeassistant.config_entries import (
+    ConfigFlowResult,
+    SOURCE_MQTT,
+    SOURCE_RECONFIGURE,
+    SOURCE_USER,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
 
 from custom_components.smarwi.const import CONF_REMOTE_ID, DOMAIN, NAME
 
@@ -35,6 +41,13 @@ def offline_flow(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         "gethostbyaddr",
     ):
         monkeypatch.setattr(socket, name, fail)
+    monkeypatch.setattr(
+        "homeassistant.components.mqtt.async_wait_for_mqtt_client",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "homeassistant.components.mqtt.is_connected", Mock(return_value=True)
+    )
     setup = AsyncMock(return_value=True)
     monkeypatch.setattr("homeassistant.config_entries.ConfigEntry.async_setup", setup)
     return setup
@@ -260,3 +273,202 @@ def test_english_flow_messages() -> None:
     )
     assert translations["config"]["error"]["invalid_remote_id"]
     assert translations["config"]["abort"]["already_configured"]
+
+
+@pytest.mark.parametrize("ready,connected", [(False, False), (True, False)])
+async def test_broker_not_ready_then_recover(
+    hass: HomeAssistant,
+    offline_flow: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    ready: bool,
+    connected: bool,
+) -> None:
+    """Require the configured MQTT transport without probing a physical device."""
+    wait = AsyncMock(return_value=ready)
+    connection = Mock(return_value=connected)
+    monkeypatch.setattr(
+        "homeassistant.components.mqtt.async_wait_for_mqtt_client", wait
+    )
+    monkeypatch.setattr("homeassistant.components.mqtt.is_connected", connection)
+    form = await start_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {CONF_REMOTE_ID: "offline_remote"}
+    )
+    assert result.get("errors") == {"base": "cannot_connect"}
+    assert not hass.config_entries.async_entries(DOMAIN)
+    offline_flow.assert_not_awaited()
+    if not ready:
+        connection.assert_not_called()
+    wait.return_value = True
+    connection.return_value = True
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {CONF_REMOTE_ID: "offline_remote"}
+    )
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize("new_id", ["old", "new"])
+async def test_reconfigure_preserves_entry(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, new_id: str
+) -> None:
+    """Preserve the config entry and reload only when its data changes."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="old", data={CONF_REMOTE_ID: "old"}
+    )
+    entry.add_to_hass(hass)
+    reload = Mock()
+    monkeypatch.setattr(hass.config_entries, "async_schedule_reload", reload)
+    form = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id}
+    )
+    assert form.get("step_id") == "reconfigure"
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {CONF_REMOTE_ID: "+"}
+    )
+    assert result.get("errors") == {CONF_REMOTE_ID: "invalid_remote_id"}
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {CONF_REMOTE_ID: new_id}
+    )
+    assert result.get("reason") == "reconfigure_successful"
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+    assert entry.data == {CONF_REMOTE_ID: new_id}
+    assert entry.unique_id == new_id
+    if new_id == "old":
+        reload.assert_not_called()
+    else:
+        reload.assert_called_once_with(entry.entry_id)
+
+
+@pytest.mark.parametrize("unique_id,data_id", [("taken", "legacy"), (None, "taken")])
+async def test_reconfigure_rejects_other_entry(
+    hass: HomeAssistant, unique_id: str | None, data_id: str
+) -> None:
+    """Reject duplicate namespaces without changing either entry."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="old", data={CONF_REMOTE_ID: "old"}
+    )
+    other = MockConfigEntry(
+        domain=DOMAIN, unique_id=unique_id, data={CONF_REMOTE_ID: data_id}
+    )
+    entry.add_to_hass(hass)
+    other.add_to_hass(hass)
+    form = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {CONF_REMOTE_ID: "taken"}
+    )
+    assert result.get("reason") == "already_configured"
+    assert entry.data == {CONF_REMOTE_ID: "old"}
+    assert entry.unique_id == "old"
+    assert other.data == {CONF_REMOTE_ID: data_id}
+
+
+async def start_discovery(
+    hass: HomeAssistant, topic: str, payload: str
+) -> ConfigFlowResult:
+    """Submit the same discovery object that HA MQTT would supply."""
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_MQTT},
+        data=MqttServiceInfo(
+            topic=topic,
+            payload=payload,
+            qos=0,
+            retain=True,
+            subscribed_topic="ion/+/+/online",
+            timestamp=0,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "topic,payload",
+    [
+        ("ion/remote/%serial", "1"),
+        ("other/remote/%serial/online", "1"),
+        ("ion/remote/serial/online", "1"),
+        ("ion/remote/%/online", "1"),
+        ("ion/remote/%serial/status", "1"),
+        ("ion/remote/%serial/online", "0"),
+        ("ion/remote/%+/online", "1"),
+        ("ion/ remote/%serial/online", "1"),
+    ],
+)
+async def test_mqtt_discovery_rejects_invalid_messages(
+    hass: HomeAssistant, offline_flow: AsyncMock, topic: str, payload: str
+) -> None:
+    """Only documented online topics may offer discovery; never set up on input alone."""
+    result = await start_discovery(hass, topic, payload)
+    assert result.get("reason") == "invalid_discovery"
+    assert not hass.config_entries.async_entries(DOMAIN)
+    offline_flow.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "ready,connected", [(True, True), (False, False), (True, False)]
+)
+async def test_mqtt_discovery_requires_confirmation(
+    hass: HomeAssistant,
+    offline_flow: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    ready: bool,
+    connected: bool,
+) -> None:
+    """Only explicit confirmation with a connected broker creates an entry."""
+    wait = AsyncMock(return_value=ready)
+    connection = Mock(return_value=connected)
+    monkeypatch.setattr(
+        "homeassistant.components.mqtt.async_wait_for_mqtt_client", wait
+    )
+    monkeypatch.setattr("homeassistant.components.mqtt.is_connected", connection)
+    form = await start_discovery(hass, "ion/remote/%serial/online", "1")
+    assert form.get("step_id") == "discovery_confirm"
+    assert form.get("description_placeholders") == {"remote_id": "remote"}
+    assert not hass.config_entries.async_entries(DOMAIN)
+    offline_flow.assert_not_awaited()
+    duplicate = await start_discovery(hass, "ion/remote/%other_serial/online", "1")
+    assert duplicate.get("reason") == "already_in_progress"
+    result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+    if not (ready and connected):
+        assert result.get("errors") == {"base": "cannot_connect"}
+        assert not hass.config_entries.async_entries(DOMAIN)
+        wait.return_value = True
+        connection.return_value = True
+        result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+    await hass.async_block_till_done()
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    entry = result.get("result")
+    assert entry is not None
+    assert entry.data == {CONF_REMOTE_ID: "remote"}
+    assert entry.unique_id == "remote"
+    offline_flow.assert_awaited_once()
+
+
+@pytest.mark.parametrize("unique_id,data_id", [(None, "remote"), ("remote", "legacy")])
+async def test_mqtt_discovery_rejects_existing_namespace(
+    hass: HomeAssistant, offline_flow: AsyncMock, unique_id: str | None, data_id: str
+) -> None:
+    """Avoid duplicate entries even for legacy namespace data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id=unique_id, data={CONF_REMOTE_ID: data_id}
+    )
+    entry.add_to_hass(hass)
+    result = await start_discovery(hass, "ion/remote/%serial/online", "1")
+    assert result.get("reason") == "already_configured"
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+    offline_flow.assert_not_awaited()
+
+
+async def test_mqtt_discovery_rechecks_duplicates_at_confirmation(
+    hass: HomeAssistant, offline_flow: AsyncMock
+) -> None:
+    """Do not replace an entry created after the discovery notification."""
+    form = await start_discovery(hass, "ion/remote/%serial/online", "1")
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_REMOTE_ID: "remote"})
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.flow.async_configure(form["flow_id"], {})
+    assert result.get("reason") == "already_configured"
+    assert hass.config_entries.async_entries(DOMAIN) == [entry]
+    offline_flow.assert_not_awaited()
