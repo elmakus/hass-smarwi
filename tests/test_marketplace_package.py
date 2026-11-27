@@ -5,9 +5,10 @@ from io import BytesIO
 import json
 from pathlib import Path
 import socket
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from zipfile import ZipFile
 
+from aiohttp import ClientSession
 import pytest
 from pytest_homeassistant.common import MockConfigEntry
 
@@ -65,13 +66,18 @@ async def repository(
     release: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[tuple[IntegrationRepository, dict[str, bytes]]]:
-    """Use native manager/repository objects; replace only remote response bytes."""
+    """Use native manager/repository objects with offline HTTP session and responses."""
     assert Path(hass.config.config_dir) == tmp_path
     hass.data[LOVELACE_DATA] = LovelaceData(
         resource_mode="yaml",
         dashboards={},
         resources=ResourceYAMLCollection([]),
         yaml_dashboards={},
+    )
+    # Explicitly prevent HA DNS/zeroconf setup, even when this module runs alone.
+    monkeypatch.setattr(
+        "homeassistant.components.marketplace.base.async_get_clientsession",
+        Mock(return_value=Mock(spec=ClientSession)),
     )
     manager = MarketplaceManager(hass, MockConfigEntry(domain="marketplace"))
     repository = IntegrationRepository(manager, FULL_NAME)

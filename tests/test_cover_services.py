@@ -32,6 +32,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceNotSupported
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import async_get_platforms
@@ -239,6 +240,7 @@ async def test_status_updates_only_entry_owned_device_registry_metadata(
     )
     assert device is not None
     assert device.id != other_device.id
+    assert device.configuration_url is None
     cover_id = entity_registry.async_get_entity_id(
         "cover", DOMAIN, f"{DEVICE_ID}_cover"
     )
@@ -268,6 +270,12 @@ async def test_status_updates_only_entry_owned_device_registry_metadata(
     assert updated_device.configuration_url == "http://1.2.3.4"
     assert updated_device.sw_version == "updated-firmware"
     assert device_registry.async_get(other_device.id) == other_device
+    # A subsequent partial snapshot must never publish http://None.
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", STATUS)
+    await hass.async_block_till_done()
+    updated_device = device_registry.async_get(device.id)
+    assert updated_device is not None
+    assert updated_device.configuration_url == "http://1.2.3.4"
     assert entity_registry.async_get(cover_id) == cover
     assert not any(
         "calls `device_registry.async_get_device`" in record.getMessage()
@@ -2857,7 +2865,7 @@ async def test_settings_incomplete_readback_prevents_write(
 
 
 async def test_settings_readback_mismatch_blocks_more_writes(
-    smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
+    hass: HomeAssistant, smarwi_entry: MockConfigEntry, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Require operator reconciliation after an uncertain write."""
     from custom_components.smarwi.device import FinetuneSetting, encode_keyval
@@ -2880,10 +2888,19 @@ async def test_settings_readback_mismatch_blocks_more_writes(
     with pytest.raises(HomeAssistantError):
         await settings.async_set(FinetuneSetting.MOVE_SPEED, 30)
     assert len([x for x in calls if x.startswith("scfa01")]) == 1
+    issue_id = f"settings_unconfirmed_{smarwi_entry.entry_id}_{DEVICE_ID}"
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.is_persistent
+    assert not issue.is_fixable
+    assert issue.config_entry_id == smarwi_entry.entry_id
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.translation_key == "settings_unconfirmed"
     before = calls.copy()
     with pytest.raises(HomeAssistantError):
         await settings.async_set(FinetuneSetting.MOVE_POWER, 60)
     assert calls == before
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) == issue
 
 
 async def test_settings_calibrated_distance_is_not_writable(
@@ -2899,8 +2916,10 @@ async def test_settings_calibrated_distance_is_not_writable(
     await settings.async_handle_update(
         Mock(payload=encode_keyval(SETTINGS | {"cfdist": 1234}), retain=False)
     )
-    with pytest.raises(HomeAssistantError):
+    with pytest.raises(HomeAssistantError) as exc:
         await settings.async_set(FinetuneSetting.CALIBRATED_DISTANCE, 100)
+    assert exc.value.translation_domain == DOMAIN
+    assert exc.value.translation_key == "setting_invalid"
     publish.assert_not_awaited()
 
 
@@ -3148,3 +3167,218 @@ async def test_unknown_ridge_telemetry_is_not_a_fault_or_fix_request(
     assert hass.states.get(switch_id).state == "on"
     assert hass.states.get(sensor_id).state == "off"
     assert hass.states.get(cover_id).state == "open"
+
+
+@pytest.mark.parametrize("fixed", [True, False])
+async def test_native_fixation_switch(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    mqtt_mock: MqttMockHAClient,
+    fixed: bool,
+) -> None:
+    """Toggle only from known opposite telemetry, with no redundant publish."""
+    switch_id = entity_registry.async_get_entity_id(
+        "switch", DOMAIN, f"{DEVICE_ID}_ridge_fix"
+    )
+    assert switch_id
+    action = "turn_on" if fixed else "turn_off"
+    initial = STATUS.replace("fix:1", f"fix:{int(not fixed)}")
+    async_fire_mqtt_message(hass, f"{BASE_TOPIC}/status", initial)
+    await hass.async_block_till_done()
+    await hass.services.async_call(
+        "switch", action, {"entity_id": switch_id}, blocking=True
+    )
+    mqtt_mock.async_publish.assert_called_once_with(
+        f"{BASE_TOPIC}/cmd", "stop", 2, False, message_expiry_interval=None
+    )
+    mqtt_mock.async_publish.reset_mock()
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS.replace("fix:1", f"fix:{int(fixed)}")
+    )
+    await hass.async_block_till_done()
+    await hass.services.async_call(
+        "switch", action, {"entity_id": switch_id}, blocking=True
+    )
+    mqtt_mock.async_publish.assert_not_called()
+
+
+async def test_redacted_diagnostics(
+    hass: HomeAssistant, smarwi_entry: MockConfigEntry, mqtt_mock: MqttMockHAClient
+) -> None:
+    """Expose cached, safe fields only, without publishing or leaking identity."""
+    from custom_components.smarwi.diagnostics import async_get_config_entry_diagnostics
+
+    async_fire_mqtt_message(
+        hass, f"{BASE_TOPIC}/status", STATUS + "\nfw:private-version\nip:12345"
+    )
+    await hass.async_block_till_done()
+    mqtt_mock.async_publish.reset_mock()
+    result = await async_get_config_entry_diagnostics(hass, smarwi_entry)
+    assert result == {
+        "devices": [
+            {
+                "available": True,
+                "status_source": "non_retained",
+                "state_code": "IDLE",
+                "closed": False,
+                "ridge_fixed": True,
+                "ridge_inside": True,
+                "rssi": None,
+            }
+        ]
+    }
+    mqtt_mock.async_publish.assert_not_called()
+
+
+@pytest.mark.parametrize("status_first", [True, False])
+async def test_availability_logs_once_per_transition(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    broker_connection: Mock,
+    caplog: pytest.LogCaptureFixture,
+    status_first: bool,
+) -> None:
+    """Report broker loss and recovery once regardless of observation order."""
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="custom_components.smarwi"):
+        broker_connection(False)
+        await hass.async_block_till_done()
+        broker_connection(True)
+        await hass.async_block_till_done()
+        messages = [("online", "1"), ("status", STATUS)]
+        if status_first:
+            messages.reverse()
+        for suffix, payload in messages * 2:
+            async_fire_mqtt_message(hass, f"{BASE_TOPIC}/{suffix}", payload)
+            await hass.async_block_till_done()
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "0")
+        await hass.async_block_till_done()
+        async_fire_mqtt_message(hass, f"{BASE_TOPIC}/online", "0")
+        await hass.async_block_till_done()
+    assert [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "custom_components.smarwi"
+        and record.getMessage().startswith(f"SMARWI {DEVICE_ID} is ")
+    ] == [
+        f"SMARWI {DEVICE_ID} is unavailable",
+        f"SMARWI {DEVICE_ID} is available",
+        f"SMARWI {DEVICE_ID} is unavailable",
+    ]
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+async def test_reconfigure_settings_barrier(
+    hass: HomeAssistant, smarwi_entry: MockConfigEntry, uncertain: bool
+) -> None:
+    """A native reconfigure flow cannot discard active or uncertain settings writes."""
+    from homeassistant.config_entries import SOURCE_RECONFIGURE
+
+    settings = smarwi_entry.runtime_data[DEVICE_ID].finetune_settings
+    if uncertain:
+        settings._write_uncertain = True
+    else:
+        await settings._write_lock.acquire()
+    try:
+        form = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_RECONFIGURE, "entry_id": smarwi_entry.entry_id},
+        )
+        result = await hass.config_entries.flow.async_configure(
+            form["flow_id"], {CONF_REMOTE_ID: "new_namespace"}
+        )
+        assert result.get("reason") == "settings_unconfirmed"
+        assert smarwi_entry.data == {CONF_REMOTE_ID: REMOTE_ID}
+        assert smarwi_entry.runtime_data[DEVICE_ID].finetune_settings is settings
+    finally:
+        if not uncertain:
+            settings._write_lock.release()
+
+
+async def test_manual_stale_device_removal(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    device_registry: dr.DeviceRegistry,
+) -> None:
+    """Never remove a discovered device automatically or approve removing a live cache member."""
+    from custom_components.smarwi import async_remove_config_entry_device
+
+    known = device_registry.async_get_device_by_identifier(
+        (DOMAIN, DEVICE_ID), smarwi_entry.entry_id
+    )
+    assert known is not None
+    stale = device_registry.async_get_or_create(
+        config_entry_id=smarwi_entry.entry_id, identifiers={(DOMAIN, "stale_serial")}
+    )
+    unrelated = device_registry.async_get_or_create(
+        config_entry_id=smarwi_entry.entry_id, identifiers={("other", "foreign")}
+    )
+    assert not await async_remove_config_entry_device(hass, smarwi_entry, known)
+    assert await async_remove_config_entry_device(hass, smarwi_entry, stale)
+    assert not await async_remove_config_entry_device(hass, smarwi_entry, unrelated)
+    assert device_registry.async_get(stale.id) == stale
+    assert await hass.config_entries.async_unload(smarwi_entry.entry_id)
+    assert not await async_remove_config_entry_device(hass, smarwi_entry, stale)
+
+
+async def test_native_reconfigure_preserves_registry_identity(
+    hass: HomeAssistant,
+    smarwi_entry: MockConfigEntry,
+    entity_registry: er.EntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    mqtt_mock: MqttMockHAClient,
+) -> None:
+    """Reload the same entry and rediscover the same serial without replacing registry IDs."""
+    from homeassistant.config_entries import SOURCE_RECONFIGURE
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, DEVICE_ID), smarwi_entry.entry_id
+    )
+    assert device is not None
+    entity_id = entity_registry.async_get_entity_id(
+        "cover", DOMAIN, f"{DEVICE_ID}_cover"
+    )
+    assert entity_id is not None
+    form = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_RECONFIGURE, "entry_id": smarwi_entry.entry_id},
+    )
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"], {CONF_REMOTE_ID: "new_namespace"}
+    )
+    assert result.get("reason") == "reconfigure_successful"
+    await hass.async_block_till_done()
+    assert smarwi_entry.state is ConfigEntryState.LOADED
+    assert not smarwi_entry.runtime_data
+    new_topic = f"ion/new_namespace/%{DEVICE_ID}"
+    async_fire_mqtt_message(hass, f"{new_topic}/online", "1")
+    await hass.async_block_till_done()
+    async_fire_mqtt_message(hass, f"{new_topic}/status", STATUS)
+    await hass.async_block_till_done()
+    assert DEVICE_ID in smarwi_entry.runtime_data
+    rediscovered = device_registry.async_get_device_by_identifier(
+        (DOMAIN, DEVICE_ID), smarwi_entry.entry_id
+    )
+    assert rediscovered is not None
+    assert rediscovered.id == device.id
+    assert (
+        entity_registry.async_get_entity_id("cover", DOMAIN, f"{DEVICE_ID}_cover")
+        == entity_id
+    )
+
+
+async def test_native_mqtt_discovery_offers_namespace_without_publishing(
+    hass: HomeAssistant, mqtt_mock: MqttMockHAClient
+) -> None:
+    """Exercise the native manifest subscription, not just the flow method."""
+    mqtt_mock.async_publish.reset_mock()
+    assert not hass.config_entries.async_entries(DOMAIN)
+    async_fire_mqtt_message(hass, "ion/discovery_remote/%serial/online", "1")
+    await hass.async_block_till_done()
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert len(flows) == 1
+    assert flows[0].get("step_id") == "discovery_confirm"
+    assert not hass.config_entries.async_entries(DOMAIN)
+    mqtt_mock.async_publish.assert_not_called()
+    hass.config_entries.flow.async_abort(flows[0]["flow_id"])

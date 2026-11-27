@@ -17,6 +17,9 @@ from .device import SmarwiConfigEntry, SmarwiDeviceProp, FinetuneSetting, Smarwi
 from .entity import SmarwiEntity
 
 
+PARALLEL_UPDATES = 0
+
+
 SETTINGS_ENTITY_DESCRIPTIONS = [
     NumberEntityDescription(
         key=FinetuneSetting.CALIBRATED_DISTANCE.name,

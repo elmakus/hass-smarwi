@@ -21,6 +21,9 @@ from .device import SmarwiConfigEntry, SmarwiDeviceProp, SmarwiDevice
 from .entity import SmarwiEntity
 
 
+PARALLEL_UPDATES = 0
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: SmarwiConfigEntry,

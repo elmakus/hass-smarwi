@@ -1,17 +1,37 @@
 {
   "config": {
     "error": {
-      "invalid_remote_id": "Enter a nonempty Remote ID with no leading or trailing whitespace, /, +, #, or control characters. It must form a valid UTF-8 MQTT topic of at most 65535 bytes including ion/ and /+/online."
+      "invalid_remote_id": "Enter a nonempty Remote ID with no leading or trailing whitespace, /, +, #, or control characters. It must form a valid UTF-8 MQTT topic of at most 65535 bytes including ion/ and /+/online.",
+      "cannot_connect": "Home Assistant MQTT is not connected. Check the MQTT integration and try again."
     },
     "abort": {
-      "already_configured": "This Remote ID is already configured."
+      "already_configured": "This Remote ID is already configured.",
+      "reconfigure_successful": "SMARWI configuration updated.",
+      "settings_unconfirmed": "A device settings write is pending or unconfirmed. Independently verify the settings before reloading or reconfiguring.",
+      "invalid_discovery": "The MQTT message does not identify a supported SMARWI namespace."
     },
     "step": {
       "user": {
         "description": "Before adding this integration, set up the MQTT integration in Home Assistant and configure your SMARWI devices to use your local MQTT broker.",
         "data": {
           "remote_id": "Remote ID (configured in SMARWI Settings)"
+        },
+        "data_description": {
+          "remote_id": "The MQTT topic namespace shared by the SMARWI devices. It is not a password."
         }
+      },
+      "reconfigure": {
+        "description": "Change the MQTT namespace only after independently verifying any unconfirmed device settings. This reloads the integration if the configuration changes; it does not configure the physical devices.",
+        "data": {
+          "remote_id": "Remote ID (configured in SMARWI Settings)"
+        },
+        "data_description": {
+          "remote_id": "The MQTT topic namespace shared by the SMARWI devices. It is not a password."
+        }
+      },
+      "discovery_confirm": {
+        "title": "Discovered SMARWI namespace",
+        "description": "An online message was observed for Remote ID {remote_id}. Confirm only if this namespace belongs to your devices. This does not verify their physical state."
       }
     }
   },
@@ -56,7 +76,7 @@
       },
       "calibrated_distance": {
         "name": "Calibrated distance"
-       }
+      }
     },
     "sensor": {
       "error_code": {
@@ -74,6 +94,38 @@
           "off": "Free"
         }
       }
+    }
+  },
+  "exceptions": {
+    "fixation_unknown": {
+      "message": "SMARWI fixation state is unknown"
+    },
+    "settings_unavailable": {
+      "message": "SMARWI must be available and idle to change settings"
+    },
+    "settings_invalid_readback": {
+      "message": "SMARWI settings readback is incomplete or invalid"
+    },
+    "settings_timeout": {
+      "message": "SMARWI settings readback timed out"
+    },
+    "settings_interrupted": {
+      "message": "SMARWI settings readback was interrupted"
+    },
+    "setting_invalid": {
+      "message": "SMARWI setting is read-only or outside its allowed range"
+    },
+    "settings_unconfirmed": {
+      "message": "SMARWI previous settings write is unconfirmed; verify device settings before reloading the integration"
+    },
+    "settings_mismatch": {
+      "message": "SMARWI settings readback does not match the requested configuration"
+    }
+  },
+  "issues": {
+    "settings_unconfirmed": {
+      "title": "Verify SMARWI settings on {device}",
+      "description": "A settings write could not be confirmed. Do not repeat the write or move the window to test it. Independently verify the actual device settings using the local device interface and resolve any discrepancy before reloading the integration. Reloading does not prove that the previous command succeeded. Dismiss this warning only after verification."
     }
   }
 }

@@ -14,7 +14,8 @@ from typing_extensions import override
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -156,6 +157,7 @@ class SmarwiDevice:
         self._remote_id: str = config[CONF_REMOTE_ID]
         self._base_topic = f"ion/{self._remote_id}/%{device_id}"
         self._online = False
+        self._reported_available = False
         self._status: dict[SmarwiDeviceProp, str] = {}
         self._status_source = "unknown"
         self._finetune_settings = FinetuneSettings(self)
@@ -206,6 +208,7 @@ class SmarwiDevice:
         self._online = False
         self._status_source = "previous_session" if self._status else "unknown"
         self.finetune_settings.async_invalidate()
+        self._log_availability()
         async_dispatcher_send(
             self._hass,
             self.signal_update,
@@ -289,7 +292,11 @@ class SmarwiDevice:
     async def async_toggle_ridge_fixed(self, state: bool) -> None:
         """Fix (True) or release (False) the ridge."""
         if self.ridge_fixed is None:
-            raise HomeAssistantError("SMARWI fixation state is unknown")
+            raise HomeAssistantError(
+                "SMARWI fixation state is unknown",
+                translation_domain=DOMAIN,
+                translation_key="fixation_unknown",
+            )
         if state and not self.ridge_fixed:
             LOGGER.info(f"[{self.name}] Fixing ridge")
             await self._async_mqtt_command("stop")
@@ -405,6 +412,7 @@ class SmarwiDevice:
         self._status = status
         if self.available != was_available:
             changed_props.add(SmarwiDeviceProp.AVAILABLE)
+        self._log_availability()
 
         if self.state_code.is_error():
             LOGGER.error(
@@ -434,18 +442,46 @@ class SmarwiDevice:
             if self._status_source != source:
                 self._status_source = source
                 changed_props.add(SmarwiDeviceProp.STATUS_SOURCE)
-        if (available := self.available) != was_available:
-            LOGGER.info(
-                f"[{self.name}] SMARWI {self.id} become {'available' if available else 'unavailable'}"
-            )
+        if self.available != was_available:
             changed_props.add(SmarwiDeviceProp.AVAILABLE)
+        self._log_availability()
         if changed_props:
             async_dispatcher_send(self._hass, self.signal_update, changed_props)
         await self.finetune_settings.async_update()
 
+    def _log_availability(self) -> None:
+        """Log transitions once, including broker loss and status-first recovery."""
+        available = self.available
+        if available != self._reported_available:
+            self._reported_available = available
+            if available:
+                LOGGER.info("SMARWI %s is available", self.id)
+            else:
+                LOGGER.warning("SMARWI %s is unavailable", self.id)
+
     async def _async_mqtt_command(self, payload: str) -> None:
         LOGGER.debug(f"Sending message to {self._base_topic}/cmd: {payload}")
         await mqtt.async_publish(self._hass, f"{self._base_topic}/cmd", payload, qos=2)
+
+    @callback
+    def async_report_uncertain_settings(self) -> None:
+        """Warn the operator without issuing any further device commands."""
+        if (
+            self._hass.config_entries.async_get_entry(self._config_entry.entry_id)
+            is not self._config_entry
+        ):
+            return
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            f"settings_unconfirmed_{self._config_entry.entry_id}_{self.id}",
+            config_entry_id=self._config_entry.entry_id,
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="settings_unconfirmed",
+            translation_placeholders={"device": self.name or self.id},
+        )
 
     async def _async_update_device_registry(self) -> None:
         dev_registry = dr.async_get(self._hass)
@@ -456,7 +492,10 @@ class SmarwiDevice:
             LOGGER.debug(f"Updating SMARWI {self.id} in device registry")
             dev_registry.async_update_device(
                 dev.id,
-                configuration_url=f"http://{self.ip_address}",
+                configuration_url=(
+                    f"http://{ip_address}" if (ip_address := self.ip_address)
+                    else dev.configuration_url
+                ),
                 name=self.name,
                 sw_version=self.fw_version,
                 serial_number=self.id,
@@ -477,6 +516,11 @@ class FinetuneSettings:
         self._session = 0
         self._closed = False
         self._write_uncertain = False
+
+    @property
+    def write_pending_or_uncertain(self) -> bool:
+        """Do not allow reconfiguration to discard an active settings barrier."""
+        return self._write_lock.locked() or self._write_uncertain
 
     def get(self, key: FinetuneSetting) -> int | None:
         return self._data.get(key.value)
@@ -507,7 +551,9 @@ class FinetuneSettings:
             or not self._device.state_code.is_idle()
         ):
             raise HomeAssistantError(
-                "SMARWI must be available and idle to change settings"
+                "SMARWI must be available and idle to change settings",
+                translation_domain=DOMAIN,
+                translation_key="settings_unavailable",
             )
 
     @staticmethod
@@ -524,7 +570,9 @@ class FinetuneSettings:
                 key, writable[key.value]
             ):
                 raise HomeAssistantError(
-                    "SMARWI settings readback is incomplete or invalid"
+                    "SMARWI settings readback is incomplete or invalid",
+                    translation_domain=DOMAIN,
+                    translation_key="settings_invalid_readback",
                 )
         return writable
 
@@ -538,27 +586,39 @@ class FinetuneSettings:
                 await self.async_update()
                 data = await waiter
         except TimeoutError as err:
-            raise HomeAssistantError("SMARWI settings readback timed out") from err
+            raise HomeAssistantError(
+                "SMARWI settings readback timed out",
+                translation_domain=DOMAIN,
+                translation_key="settings_timeout",
+            ) from err
         finally:
             self._readback = None
             if not waiter.done():
                 _ = waiter.cancel()
         self._check_session(session)
         if data is None:
-            raise HomeAssistantError("SMARWI settings readback was interrupted")
+            raise HomeAssistantError(
+                "SMARWI settings readback was interrupted",
+                translation_domain=DOMAIN,
+                translation_key="settings_interrupted",
+            )
         return self._validate_snapshot(data)
 
     async def async_set(self, key: FinetuneSetting, value: int) -> None:
         if not self._valid_value(key, value):
-            raise HomeAssistantError(
-                "SMARWI setting is read-only or outside its allowed range"
+            raise ServiceValidationError(
+                "SMARWI setting is read-only or outside its allowed range",
+                translation_domain=DOMAIN,
+                translation_key="setting_invalid",
             )
         session = self._session
         async with self._write_lock:
             self._check_session(session)
             if self._write_uncertain:
                 raise HomeAssistantError(
-                    "SMARWI previous settings write is unconfirmed; verify device settings before reloading the integration"
+                    "SMARWI previous settings write is unconfirmed; verify device settings before reloading the integration",
+                    translation_domain=DOMAIN,
+                    translation_key="settings_unconfirmed",
                 )
             data = await self._async_readback(session)
             if data[key.value] == value:
@@ -572,11 +632,14 @@ class FinetuneSettings:
                 observed = await self._async_readback(session)
                 if observed != data:
                     raise HomeAssistantError(
-                        "SMARWI settings readback does not match the requested configuration"
+                        "SMARWI settings readback does not match the requested configuration",
+                        translation_domain=DOMAIN,
+                        translation_key="settings_mismatch",
                     )
             except (Exception, CancelledError):
                 # A failed call may have reached the device. Never retry blindly.
                 self._write_uncertain = True
+                self._device.async_report_uncertain_settings()
                 raise
 
     async def async_update(self) -> None:

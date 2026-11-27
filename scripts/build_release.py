@@ -53,7 +53,11 @@ def build_release(output: Path, tag: str) -> Path:
         parts = relative.parts
         allowed = (
             len(parts) == 1
-            and (relative.suffix == ".py" or relative.name == "manifest.json")
+            and (
+                relative.suffix == ".py"
+                or relative.name
+                in {"manifest.json", "quality_scale.yaml", "icons.json"}
+            )
         ) or (
             len(parts) == 2
             and (
